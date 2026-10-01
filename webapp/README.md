@@ -11,7 +11,7 @@ navigation (↑↓ + Enter), manifest at
 
 ```bash
 cd webapp
-python3 -m http.server 8080
+python3 -m http.server 8080      # Windows: py -m http.server 8080
 # open http://localhost:8080/ in Chrome
 ```
 
@@ -22,21 +22,57 @@ python3 -m http.server 8080
 ## Files
 
 - `index.html` — the whole app (no build step, no dependencies)
-- `state.json` — mock card data; the app falls back to embedded data if the fetch fails
+- `state.json` — card data; the app falls back to embedded data if the fetch fails
 - `.well-known/meta-wearables-manifest.json` — Version 1 manifest (name, description, monochrome icon, theme + gradient)
 - `icon.svg` — transparent monochrome artwork (64×64 design area)
 
-## Wiring to live data (next)
+## Live data: the exporter
 
-`state.json` is shaped to be replaced by real exports:
+`tools/export_glance_state.py` builds `webapp/state.json` from the real
+homestead export — no mock data, no guessing:
 
-- `attention` ← homestead `viewer/dashboard_state.json` alerts (severity → card strip)
-- `next_up` ← MIA maintenance / garage modules
-- `quests` ← MIA missions module
+```bash
+python tools/export_glance_state.py \
+  --dashboard /path/to/mia-homestead/viewer/dashboard_state.json \
+  --quests tools/quests.json \
+  --out webapp/state.json
+```
 
-Serve the app over **HTTPS** for the glasses (plain `http://` is only
-accepted for loopback hosts like `localhost`). The manifest must be
-served as `application/json; charset=utf-8`.
+- **attention** ← unresolved homestead alerts (severity → card strip,
+  source/last-seen/repeat count → detail)
+- **next_up** ← open homestead maintenance tasks (priority → severity,
+  overdue computed from `due_date`, bumped to warning when overdue)
+- **quests** ← your quests JSON file (copy `tools/quests.example.json`
+  to start); if omitted, existing quests in `state.json` are preserved
+
+Every source is optional — missing data renders as an honest "All clear."
+Re-run the exporter (or schedule it) and reload the app to refresh.
+MIA-core sources (garage maintenance, missions) plug in here next.
+
+## Hosting for the glasses
+
+The glasses need the app over **HTTPS** (plain `http://` is only accepted
+for loopback hosts like `localhost`). Quickest path on Windows:
+
+1. Download `cloudflared` (64-bit .exe) from
+   <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>
+2. In a second terminal (keep the `http.server` running):
+   `.\cloudflared-windows-amd64.exe tunnel --url http://localhost:8080`
+3. Use the printed `https://….trycloudflare.com` URL — the manifest is
+   served automatically at `<url>/.well-known/meta-wearables-manifest.json`
+
+The trycloudflare URL changes on every restart; fine for testing.
+
+## Loading onto the glasses
+
+1. Meta AI app on the paired phone → enable **Developer Mode** (tap the
+   app version 5 times).
+2. Load the hosted HTTPS URL as a web app.
+
+If the Meta AI app hangs while loading account/Instagram info: update the
+app, then force-stop and **clear storage** (Settings → Apps → Meta AI →
+Storage → Clear data), reopen and log in fresh; reinstall as a last resort.
+This only blocks on-glass loading — hosting and preview work regardless.
 
 ## Rules this prototype follows
 
