@@ -217,9 +217,11 @@ function render(state) {
     for (const item of items) mount.append(cardButton(item, key === "quests" ? "quest" : "card"));
   }
   const src = (state.meta && state.meta.source) || "live";
+  const gen = (state.meta && state.meta.generated_at)
+    ? " · data " + String(state.meta.generated_at).slice(11, 16) : "";
   document.getElementById("foot").innerHTML =
     (src === "live" ? "" : '<span class="live-dot">●</span> preview data &nbsp;·&nbsp; ') +
-    "↑↓ navigate · Enter selects · detail lives on your phone";
+    "↑↓ navigate · Enter selects · R refreshes" + gen;
   // Focus the first card so directional navigation starts immediately.
   const first = document.querySelector(".card");
   if (first && !document.querySelector(".card:focus")) first.focus({ preventScroll: true });
@@ -233,6 +235,16 @@ async function loadState() {
     s.meta = s.meta || {}; s.meta.source = "live";
     return s;
   } catch (e) { return MOCK; }
+}
+
+/* Refresh state without losing your place; quest check-ins live in
+   localStorage so they survive re-renders. */
+async function refresh() {
+  const cards = [...document.querySelectorAll(".card")];
+  const idx = Math.max(0, cards.indexOf(document.activeElement));
+  render(await loadState());
+  const fresh = [...document.querySelectorAll(".card")];
+  (fresh[idx] || fresh[0])?.focus({ preventScroll: true });
 }
 
 /* Directional navigation: ↑/↓ move between cards, Home/End jump. */
@@ -253,6 +265,12 @@ function tick() {
 tick(); setInterval(tick, 20000);
 
 loadState().then(render);
+
+/* Auto-refresh every minute + manual refresh with R. */
+setInterval(refresh, 60000);
+document.addEventListener("keydown", e => {
+  if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey && !e.altKey) refresh();
+});
 </script>
 </body>
 </html>
