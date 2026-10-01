@@ -104,6 +104,51 @@
     font-size: 3.2vmin; color: #7d9384; text-align: center;
   }
   .live-dot { color: #ffb020; }
+  .sev-critical { --sev: #ff5f5f; }
+  .sev-warning  { --sev: #ffb020; }
+  .sev-info     { --sev: #35d07f; }
+  /* Proposal detail overlay (read / propose / approve). */
+  .overlay[hidden] { display: none; }
+  .overlay {
+    position: fixed; inset: 0; z-index: 10;
+    background: rgba(0,0,0,0.78);
+    display: grid; place-items: center;
+    padding: 5vmin;
+  }
+  .detail-card {
+    --sev: #35d07f;
+    inline-size: 100%; max-block-size: 100%; overflow-y: auto;
+    scrollbar-width: none;
+    background: #0a140e;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-inline-start: 1.4vmin solid var(--sev);
+    border-radius: 3vmin; padding: 4vmin;
+    display: grid; gap: 2.2vmin; align-content: start;
+  }
+  .detail-card::-webkit-scrollbar { display: none; }
+  .ev { margin: 0; padding-inline-start: 5vmin; color: #c3d4c8; font-size: 3.6vmin; display: grid; gap: 1.2vmin; }
+  .safety {
+    border-inline-start: 1vmin solid #ffb020;
+    padding: 2vmin 3vmin; color: #ffd9a0; font-size: 3.4vmin; line-height: 1.4;
+    background: rgba(255,176,32,0.08); border-radius: 2vmin;
+  }
+  .preview-tag {
+    font-size: 3vmin; font-weight: 800; letter-spacing: 0.14em;
+    color: #07130c; background: #ffb020; border-radius: 999px;
+    padding: 1vmin 2.6vmin; justify-self: start;
+  }
+  .detail-actions { display: grid; gap: 2vmin; margin-block-start: 1vmin; }
+  .btn {
+    appearance: none; border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.06); color: #eaf3ec;
+    border-radius: 3vmin; padding: 3vmin;
+    font-size: 4.4vmin; font-weight: 750; font-family: inherit;
+    cursor: pointer; text-align: center; inline-size: 100%;
+  }
+  .btn.primary { background: #35d07f; color: #07130c; border-color: transparent; }
+  .btn:focus-visible { outline: 0.8vmin solid #35d07f; outline-offset: 0.6vmin; }
+  .detail-note { font-size: 3.8vmin; color: #9fd8b4; text-align: center; }
+  .card.decided { opacity: 0.6; }
 </style>
 </head>
 <body>
@@ -132,6 +177,21 @@
   </main>
 
   <footer class="hint" id="foot">loading&hellip;</footer>
+
+  <div class="overlay" id="detail" hidden>
+    <div class="detail-card" role="dialog" aria-modal="true" aria-labelledby="d-title">
+      <span class="area" id="d-area"></span>
+      <span class="title" id="d-title"></span>
+      <span class="detail" id="d-detail"></span>
+      <div id="d-proposal"></div>
+      <div class="detail-actions">
+        <button class="btn primary" id="d-approve" type="button">Approve</button>
+        <button class="btn" id="d-dismiss" type="button">Dismiss</button>
+        <button class="btn" id="d-back" type="button">&larr; Back</button>
+      </div>
+      <div class="detail-note" id="d-note" hidden></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -142,7 +202,14 @@ const MOCK = {
   attention: [
     { id: "gh-ph", area: "Greenhouse", title: "pH drift high",
       detail: "Aquaponics cell at 7.6 — target 6.8–7.2. Dosing proposal awaiting approval.",
-      severity: "warning", action: "Review proposal" },
+      severity: "warning", action: "Review proposal",
+      proposal: {
+        demo: true,
+        title: "Dose pH down",
+        summary: "Add pH-down solution to the Cell A sump to return to the 6.8–7.2 band.",
+        evidence: ["pH 7.6 vs target 6.8–7.2", "Drifting across 2 readings", "Dosing pump idle, interlocks nominal"],
+        safety: "Preview only — in production this queues with the homestead controller and Safety MCU. Nothing actuates from glasses.",
+        approve_label: "Approve dosing", dismiss_label: "Dismiss" } },
     { id: "gh-feeder", area: "Greenhouse", title: "Fish feeder 2 days overdue",
       detail: "Feeder A missed its refill window. Fish were fed manually.",
       severity: "critical", action: "Confirm refill" }
@@ -199,6 +266,9 @@ function cardButton(item, kind) {
     });
   } else {
     row.append(el("span", "action", (item.action || "Open") + " →"));
+    b.dataset.itemId = item.id;
+    b.addEventListener("click", () => openDetail(item));
+    paintCardDecision(b, item);
   }
   b.append(row);
   return b;
@@ -221,7 +291,7 @@ function render(state) {
     ? " · data " + String(state.meta.generated_at).slice(11, 16) : "";
   document.getElementById("foot").innerHTML =
     (src === "live" ? "" : '<span class="live-dot">●</span> preview data &nbsp;·&nbsp; ') +
-    "↑↓ navigate · Enter selects · R refreshes" + gen;
+    "↑↓ navigate · Enter opens detail · R refreshes" + gen;
   // Focus the first card so directional navigation starts immediately.
   const first = document.querySelector(".card");
   if (first && !document.querySelector(".card:focus")) first.focus({ preventScroll: true });
@@ -240,12 +310,108 @@ async function loadState() {
 /* Refresh state without losing your place; quest check-ins live in
    localStorage so they survive re-renders. */
 async function refresh() {
+  if (!document.getElementById("detail").hidden) return; // don't disturb an open detail view
   const cards = [...document.querySelectorAll(".card")];
   const idx = Math.max(0, cards.indexOf(document.activeElement));
   render(await loadState());
   const fresh = [...document.querySelectorAll(".card")];
   (fresh[idx] || fresh[0])?.focus({ preventScroll: true });
 }
+
+/* ---- Proposal detail: read / propose / approve ----
+   Decisions persist in localStorage. Approvals are preview-only here;
+   in production they queue with the homestead controller + Safety MCU. */
+const decisionKey = id => "glance-decision-" + id;
+const getDecision = id => { try { return localStorage.getItem(decisionKey(id)); } catch (e) { return null; } };
+const setDecision = (id, v) => { try { localStorage.setItem(decisionKey(id), v); } catch (e) {} };
+
+let detailItem = null;
+let detailReturnTo = null;
+
+function paintCardDecision(b, item) {
+  const dec = getDecision(item.id);
+  const action = b.querySelector(".action");
+  b.classList.toggle("decided", !!dec);
+  if (action) {
+    if (dec === "approved") action.textContent = "✓ Approved";
+    else if (dec === "dismissed") action.textContent = "Dismissed";
+  }
+}
+
+function openDetail(item) {
+  detailItem = item;
+  detailReturnTo = document.activeElement;
+  const ov = document.getElementById("detail");
+  const card = ov.querySelector(".detail-card");
+  card.classList.remove("sev-critical", "sev-warning", "sev-info");
+  card.classList.add("sev-" + (item.severity || "info"));
+  document.getElementById("d-area").textContent = item.area || "";
+  document.getElementById("d-title").textContent = item.title || "";
+  const det = document.getElementById("d-detail");
+  det.textContent = item.detail || "";
+  det.style.display = item.detail ? "" : "none";
+
+  const pm = document.getElementById("d-proposal");
+  pm.replaceChildren();
+  const prop = item.proposal;
+  const approveBtn = document.getElementById("d-approve");
+  const dismissBtn = document.getElementById("d-dismiss");
+  if (prop) {
+    if (prop.demo) pm.append(el("span", "preview-tag", "PREVIEW"));
+    pm.append(el("div", "title", prop.title || "Proposal"));
+    if (prop.summary) pm.append(el("div", "detail", prop.summary));
+    if (prop.evidence && prop.evidence.length) {
+      const ul = el("ul", "ev");
+      for (const e of prop.evidence) ul.append(el("li", null, e));
+      pm.append(ul);
+    }
+    if (prop.safety) pm.append(el("div", "safety", prop.safety));
+    approveBtn.hidden = false;
+    dismissBtn.hidden = false;
+    approveBtn.textContent = prop.approve_label || "Approve";
+    dismissBtn.textContent = prop.dismiss_label || "Dismiss";
+  } else {
+    approveBtn.hidden = true;
+    dismissBtn.hidden = true;
+  }
+  paintDecision();
+  ov.hidden = false;
+  (prop ? approveBtn : document.getElementById("d-back")).focus();
+}
+
+function paintDecision() {
+  const note = document.getElementById("d-note");
+  const dec = detailItem && getDecision(detailItem.id);
+  if (dec === "approved") { note.hidden = false; note.textContent = "✓ Approved — preview only, nothing actuated."; }
+  else if (dec === "dismissed") { note.hidden = false; note.textContent = "Dismissed."; }
+  else note.hidden = true;
+}
+
+function decide(v) {
+  if (!detailItem) return;
+  setDecision(detailItem.id, v);
+  paintDecision();
+  const b = document.querySelector('.card[data-item-id="' + CSS.escape(detailItem.id) + '"]');
+  if (b) paintCardDecision(b, detailItem);
+}
+
+function closeDetail() {
+  document.getElementById("detail").hidden = true;
+  detailItem = null;
+  if (detailReturnTo && document.contains(detailReturnTo)) detailReturnTo.focus({ preventScroll: true });
+  detailReturnTo = null;
+}
+
+document.getElementById("d-back").addEventListener("click", closeDetail);
+document.getElementById("d-approve").addEventListener("click", () => decide("approved"));
+document.getElementById("d-dismiss").addEventListener("click", () => decide("dismissed"));
+document.getElementById("detail").addEventListener("keydown", e => {
+  const btns = [...document.querySelectorAll("#detail .btn")].filter(b => !b.hidden);
+  const i = btns.indexOf(document.activeElement);
+  if (e.key === "Escape") { e.preventDefault(); closeDetail(); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); (btns[i + 1] || btns[0])?.focus(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); (btns[i - 1] || btns[btns.length - 1])?.focus(); }
+});
 
 /* Directional navigation: ↑/↓ move between cards, Home/End jump. */
 document.getElementById("content").addEventListener("keydown", e => {

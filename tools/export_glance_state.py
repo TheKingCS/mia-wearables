@@ -60,6 +60,31 @@ def due_line(due_date):
     return f"Due in {delta} day{'s' if delta != 1 else ''} ({d.isoformat()})."
 
 
+def demo_proposal(a):
+    """Attach a clearly-labeled demo proposal to pH alerts.
+
+    Real proposals will come from the homestead experiment/proposal
+    queue; this stands in so the read/propose/approve interaction can
+    be exercised end to end."""
+    haystack = f"{a.get('message', '')} {a.get('source', '')}".lower()
+    if "ph" not in haystack:
+        return None
+    return {
+        "demo": True,
+        "title": "Dose pH down",
+        "summary": "Add pH-down solution to return the cell to its target band.",
+        "evidence": [
+            a.get("message", ""),
+            f"Source: {a.get('source')}",
+            f"Occurrences: {a.get('occurrence_count') or a.get('repeat_count') or 1}",
+        ],
+        "safety": ("Preview only — approvals queue with the homestead controller "
+                   "and Safety MCU. Nothing actuates from glasses."),
+        "approve_label": "Approve",
+        "dismiss_label": "Dismiss",
+    }
+
+
 def map_alert(a):
     parts = []
     if a.get("source"):
@@ -68,13 +93,15 @@ def map_alert(a):
         parts.append(f"last seen {a['last_seen']}")
     if (a.get("occurrence_count") or a.get("repeat_count") or 1) > 1:
         parts.append(f"×{a.get('occurrence_count') or a.get('repeat_count')} occurrences")
+    proposal = demo_proposal(a)
     return {
         "id": f"alert-{a.get('id')}",
         "area": "Greenhouse",
         "title": a.get("message", "Unnamed alert"),
         "detail": ". ".join(parts) + "." if parts else "",
         "severity": SEV_MAP.get(str(a.get("severity", "info")).lower(), "info"),
-        "action": "Open on phone",
+        "action": "Review proposal" if proposal else "Open on phone",
+        "proposal": proposal,
     }
 
 

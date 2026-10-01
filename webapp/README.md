@@ -49,6 +49,22 @@ Every source is optional — missing data renders as an honest "All clear."
 Re-run the exporter (or schedule it) and reload the app to refresh.
 MIA-core sources (garage maintenance, missions) plug in here next.
 
+## Proposal approval (read / propose / approve)
+
+Tapping (or Enter on) an attention card opens a detail view. Cards that
+carry a `proposal` show what MIA proposes, the evidence behind it, and a
+safety note — with **Approve** / **Dismiss** buttons navigable by ↑↓ and
+Enter (Esc or ← Back returns to the list). Decisions persist in
+`localStorage` and the card shows its decided state.
+
+Approvals are **preview-only** in this prototype: in production they will
+queue with the homestead controller and Safety MCU. Nothing actuates
+from glasses — the safety note on every proposal says so.
+
+`tools/export_glance_state.py` attaches a demo proposal to pH alerts
+(`demo: true`); real proposals will come from the homestead
+experiment/proposal queue.
+
 ## Hosting for the glasses
 
 The glasses need the app over **HTTPS** (plain `http://` is only accepted
