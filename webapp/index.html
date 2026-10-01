@@ -166,6 +166,10 @@
       <h2 id="h-attention">Needs attention</h2>
       <div class="cards" id="attention"></div>
     </section>
+    <section aria-labelledby="h-proposals">
+      <h2 id="h-proposals">Proposals</h2>
+      <div class="cards" id="proposals"></div>
+    </section>
     <section aria-labelledby="h-next">
       <h2 id="h-next">Next up</h2>
       <div class="cards" id="nextup"></div>
@@ -201,18 +205,24 @@ const MOCK = {
   meta: { source: "embedded-fallback" },
   attention: [
     { id: "gh-ph", area: "Greenhouse", title: "pH drift high",
-      detail: "Aquaponics cell at 7.6 — target 6.8–7.2. Dosing proposal awaiting approval.",
-      severity: "warning", action: "Review proposal",
-      proposal: {
-        demo: true,
-        title: "Dose pH down",
-        summary: "Add pH-down solution to the Cell A sump to return to the 6.8–7.2 band.",
-        evidence: ["pH 7.6 vs target 6.8–7.2", "Drifting across 2 readings", "Dosing pump idle, interlocks nominal"],
-        safety: "Preview only — in production this queues with the homestead controller and Safety MCU. Nothing actuates from glasses.",
-        approve_label: "Approve dosing", dismiss_label: "Dismiss" } },
+      detail: "Aquaponics cell at 7.6 — target 6.8–7.2.", severity: "warning",
+      action: "Open on phone", proposal: null },
     { id: "gh-feeder", area: "Greenhouse", title: "Fish feeder 2 days overdue",
       detail: "Feeder A missed its refill window. Fish were fed manually.",
       severity: "critical", action: "Confirm refill" }
+  ],
+  proposals: [
+    { id: "exp-7", area: "Proposals", title: "Test EC target maximum: 1.8 → 2.0",
+      detail: "Raising EC max improves lettuce yield.", severity: "warning",
+      action: "Review",
+      proposal: {
+        demo: true,
+        title: "Test EC target maximum: 1.8 → 2.0",
+        summary: "Raising EC max improves lettuce yield.",
+        evidence: ["Lettuce Raft: baseline 1.8, test 2.0", "Runs until 2026-10-15",
+                   "Proposed by assistant"],
+        safety: "Approval changes the target the control loop aims for. Every dose still passes the Safety MCU's hard limits — approval changes the target, never bypasses safety.",
+        approve_label: "Start experiment", dismiss_label: "Dismiss" } }
   ],
   next_up: [
     { id: "gr-mower", area: "Garage", title: "Sharpen mower blades",
@@ -275,13 +285,16 @@ function cardButton(item, kind) {
 }
 
 function render(state) {
-  const map = [["attention", "attention"], ["next_up", "nextup"], ["quests", "quests"]];
+  const map = [["attention", "attention"], ["proposals", "proposals"],
+               ["next_up", "nextup"], ["quests", "quests"]];
+  const emptyText = { quests: "No quests yet — enjoy the day.",
+                      proposals: "No proposals awaiting review." };
   for (const [key, mountId] of map) {
     const mount = document.getElementById(mountId);
     mount.replaceChildren();
     const items = state[key] || [];
     if (!items.length) {
-      mount.append(el("div", "allclear", key === "quests" ? "No quests yet — enjoy the day." : "All clear."));
+      mount.append(el("div", "allclear", emptyText[key] || "All clear."));
       continue;
     }
     for (const item of items) mount.append(cardButton(item, key === "quests" ? "quest" : "card"));
@@ -319,8 +332,9 @@ async function refresh() {
 }
 
 /* ---- Proposal detail: read / propose / approve ----
-   Decisions persist in localStorage. Approvals are preview-only here;
-   in production they queue with the homestead controller + Safety MCU. */
+   Decisions persist in localStorage. The write-back to the homestead
+   approval queue isn't built yet, so approvals are captured on-device
+   for now — nothing actuates from the glasses. */
 const decisionKey = id => "glance-decision-" + id;
 const getDecision = id => { try { return localStorage.getItem(decisionKey(id)); } catch (e) { return null; } };
 const setDecision = (id, v) => { try { localStorage.setItem(decisionKey(id), v); } catch (e) {} };
@@ -358,6 +372,7 @@ function openDetail(item) {
   const dismissBtn = document.getElementById("d-dismiss");
   if (prop) {
     if (prop.demo) pm.append(el("span", "preview-tag", "PREVIEW"));
+    else if (prop.real) pm.append(el("span", "preview-tag", "HOMESTEAD QUEUE"));
     pm.append(el("div", "title", prop.title || "Proposal"));
     if (prop.summary) pm.append(el("div", "detail", prop.summary));
     if (prop.evidence && prop.evidence.length) {
@@ -382,7 +397,7 @@ function openDetail(item) {
 function paintDecision() {
   const note = document.getElementById("d-note");
   const dec = detailItem && getDecision(detailItem.id);
-  if (dec === "approved") { note.hidden = false; note.textContent = "✓ Approved — preview only, nothing actuated."; }
+  if (dec === "approved") { note.hidden = false; note.textContent = "✓ Approved — saved on this device. Sending the decision to the homestead queue is coming next."; }
   else if (dec === "dismissed") { note.hidden = false; note.textContent = "Dismissed."; }
   else note.hidden = true;
 }
