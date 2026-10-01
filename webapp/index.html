@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIA Glance</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body, #app { inline-size: 100%; block-size: 100%; }
+  body {
+    margin: 0;
+    min-inline-size: 0;
+    background: #000;
+    color: #eaf3ec;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app-shell {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    inline-size: 100%;
+    block-size: 100%;
+    overflow: hidden;
+    background: radial-gradient(120% 90% at 50% 0%, #0b1f14 0%, #050a07 60%, #000 100%);
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3.5vmin 5vmin 2vmin;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 2.5vmin;
+    font-weight: 800; letter-spacing: 0.14em; font-size: 4.2vmin;
+  }
+  .brand svg { inline-size: 6vmin; block-size: 6vmin; }
+  .clock { font-size: 4.2vmin; font-weight: 600; color: #9fd8b4; font-variant-numeric: tabular-nums; }
+  .content {
+    min-inline-size: 0; min-block-size: 0;
+    overflow-y: auto;
+    padding: 0 5vmin 4vmin;
+    scrollbar-width: none;
+  }
+  .content::-webkit-scrollbar { display: none; }
+  section { margin-block-start: 3.5vmin; }
+  section:first-child { margin-block-start: 1vmin; }
+  h2 {
+    margin: 0 0 2vmin;
+    font-size: 3.4vmin; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: #8fd0a4;
+  }
+  .cards { display: grid; gap: 2.4vmin; }
+  .card {
+    --sev: #35d07f;
+    appearance: none; border: 1px solid rgba(255,255,255,0.09);
+    border-inline-start: 1.4vmin solid var(--sev);
+    background: rgba(255,255,255,0.045);
+    border-radius: 3vmin;
+    padding: 3vmin 4vmin;
+    text-align: start; color: inherit;
+    cursor: pointer; inline-size: 100%;
+    display: grid; gap: 1.2vmin;
+    font-family: inherit;
+  }
+  .card.sev-critical { --sev: #ff5f5f; }
+  .card.sev-warning  { --sev: #ffb020; }
+  .card.sev-info     { --sev: #35d07f; }
+  .card:focus { outline: none; }
+  .card:focus-visible {
+    outline: 0.8vmin solid #35d07f;
+    outline-offset: 0.6vmin;
+    background: rgba(53,208,127,0.10);
+  }
+  .area {
+    font-size: 3vmin; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--sev);
+  }
+  .title { font-size: 5vmin; font-weight: 750; line-height: 1.15; }
+  .detail { font-size: 3.6vmin; line-height: 1.4; color: #c3d4c8; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 2vmin; }
+  .action { font-size: 3.6vmin; font-weight: 700; color: #eaf3ec; }
+  .xp {
+    font-size: 3.2vmin; font-weight: 800; color: #07130c;
+    background: #35d07f; border-radius: 999px; padding: 1vmin 2.6vmin;
+    white-space: nowrap;
+  }
+  .card.done { opacity: 0.55; }
+  .card.done .title { text-decoration: line-through; }
+  .check {
+    inline-size: 5vmin; block-size: 5vmin; border-radius: 50%;
+    border: 0.7vmin solid #35d07f; flex: none;
+    display: inline-grid; place-items: center;
+    color: #07130c; font-weight: 900; font-size: 3.4vmin;
+  }
+  .card.done .check { background: #35d07f; }
+  .allclear {
+    border: 1px dashed rgba(255,255,255,0.18);
+    border-radius: 3vmin; padding: 3vmin 4vmin;
+    color: #9fd8b4; font-size: 4vmin;
+  }
+  .hint {
+    padding: 2vmin 5vmin 3.5vmin;
+    font-size: 3.2vmin; color: #7d9384; text-align: center;
+  }
+  .live-dot { color: #ffb020; }
+</style>
+</head>
+<body>
+<div id="app" class="app-shell">
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><g fill="#35d07f"><circle cx="47" cy="8" r="5"/><rect x="12" y="36" width="10" height="16" rx="5"/><rect x="27" y="26" width="10" height="26" rx="5"/><rect x="42" y="16" width="10" height="36" rx="5"/></g></svg>
+      <span>MIA&nbsp;Glance</span>
+    </div>
+    <div class="clock" id="clock" aria-label="current time">--:--</div>
+  </header>
+
+  <main class="content" id="content">
+    <section aria-labelledby="h-attention">
+      <h2 id="h-attention">Needs attention</h2>
+      <div class="cards" id="attention"></div>
+    </section>
+    <section aria-labelledby="h-next">
+      <h2 id="h-next">Next up</h2>
+      <div class="cards" id="nextup"></div>
+    </section>
+    <section aria-labelledby="h-quests">
+      <h2 id="h-quests">Today&rsquo;s quests</h2>
+      <div class="cards" id="quests"></div>
+    </section>
+  </main>
+
+  <footer class="hint" id="foot">loading&hellip;</footer>
+</div>
+
+<script>
+"use strict";
+/* Embedded fallback so the app renders even if state.json is unreachable. */
+const MOCK = {
+  meta: { source: "embedded-fallback" },
+  attention: [
+    { id: "gh-ph", area: "Greenhouse", title: "pH drift high",
+      detail: "Aquaponics cell at 7.6 — target 6.8–7.2. Dosing proposal awaiting approval.",
+      severity: "warning", action: "Review proposal" },
+    { id: "gh-feeder", area: "Greenhouse", title: "Fish feeder 2 days overdue",
+      detail: "Feeder A missed its refill window. Fish were fed manually.",
+      severity: "critical", action: "Confirm refill" }
+  ],
+  next_up: [
+    { id: "gr-mower", area: "Garage", title: "Sharpen mower blades",
+      detail: "Overdue 12 days. Next mow window: Saturday.", severity: "info", action: "Schedule" },
+    { id: "gr-washer", area: "Garage", title: "Winterize pressure washer",
+      detail: "First freeze risk in about 3 weeks.", severity: "info", action: "Add to weekend" }
+  ],
+  quests: [
+    { id: "q-checkin", area: "Greenhouse", title: "Morning greenhouse check-in",
+      detail: "Walk the cell, glance at the twin.", xp: 25 },
+    { id: "q-phcal", area: "Greenhouse", title: "Calibrate pH pen",
+      detail: "Due every 30 days — last done 34 days ago.", xp: 40 }
+  ]
+};
+
+const doneKey = id => "glance-done-" + id;
+const isDone = id => { try { return localStorage.getItem(doneKey(id)) === "1"; } catch (e) { return false; } };
+const setDone = (id, v) => { try { localStorage.setItem(doneKey(id), v ? "1" : "0"); } catch (e) {} };
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function cardButton(item, kind) {
+  const b = el("button", "card sev-" + (item.severity || "info"));
+  b.type = "button";
+  b.append(el("span", "area", item.area || ""));
+  b.append(el("span", "title", item.title || ""));
+  if (item.detail) b.append(el("span", "detail", item.detail));
+  const row = el("span", "row");
+  if (kind === "quest") {
+    const left = el("span", "row");
+    const check = el("span", "check", isDone(item.id) ? "✓" : "");
+    check.setAttribute("aria-hidden", "true");
+    left.append(check);
+    left.append(el("span", "action", isDone(item.id) ? "Done" : "Check in"));
+    row.append(left);
+    row.append(el("span", "xp", "+" + (item.xp || 10) + " XP"));
+    if (isDone(item.id)) b.classList.add("done");
+    b.setAttribute("aria-pressed", isDone(item.id) ? "true" : "false");
+    b.addEventListener("click", () => {
+      const v = !isDone(item.id);
+      setDone(item.id, v);
+      b.classList.toggle("done", v);
+      b.setAttribute("aria-pressed", v ? "true" : "false");
+      check.textContent = v ? "✓" : "";
+      left.querySelector(".action").textContent = v ? "Done" : "Check in";
+    });
+  } else {
+    row.append(el("span", "action", (item.action || "Open") + " →"));
+  }
+  b.append(row);
+  return b;
+}
+
+function render(state) {
+  const map = [["attention", "attention"], ["next_up", "nextup"], ["quests", "quests"]];
+  for (const [key, mountId] of map) {
+    const mount = document.getElementById(mountId);
+    mount.replaceChildren();
+    const items = state[key] || [];
+    if (!items.length) {
+      mount.append(el("div", "allclear", key === "quests" ? "No quests yet — enjoy the day." : "All clear."));
+      continue;
+    }
+    for (const item of items) mount.append(cardButton(item, key === "quests" ? "quest" : "card"));
+  }
+  const src = (state.meta && state.meta.source) || "live";
+  document.getElementById("foot").innerHTML =
+    (src === "live" ? "" : '<span class="live-dot">●</span> preview data &nbsp;·&nbsp; ') +
+    "↑↓ navigate · Enter selects · detail lives on your phone";
+  // Focus the first card so directional navigation starts immediately.
+  const first = document.querySelector(".card");
+  if (first && !document.querySelector(".card:focus")) first.focus({ preventScroll: true });
+}
+
+async function loadState() {
+  try {
+    const r = await fetch("state.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("http " + r.status);
+    const s = await r.json();
+    s.meta = s.meta || {}; s.meta.source = "live";
+    return s;
+  } catch (e) { return MOCK; }
+}
+
+/* Directional navigation: ↑/↓ move between cards, Home/End jump. */
+document.getElementById("content").addEventListener("keydown", e => {
+  const cards = [...document.querySelectorAll(".card")];
+  const i = cards.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") { e.preventDefault(); (cards[i + 1] || cards[0])?.focus(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); (cards[i - 1] || cards[cards.length - 1])?.focus(); }
+  else if (e.key === "Home") { e.preventDefault(); cards[0]?.focus(); }
+  else if (e.key === "End") { e.preventDefault(); cards[cards.length - 1]?.focus(); }
+});
+
+function tick() {
+  const d = new Date();
+  let h = d.getHours() % 12 || 12;
+  document.getElementById("clock").textContent = h + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+tick(); setInterval(tick, 20000);
+
+loadState().then(render);
+</script>
+</body>
+</html>
