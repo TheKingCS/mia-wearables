@@ -6,7 +6,8 @@ Builds webapp/state.json for the MIA Glance web app from live sources:
 
   - homestead dashboard_state.json  ->  attention (unresolved alerts)
                                         next_up   (open maintenance tasks)
-  - optional quests JSON file       ->  quests    (today's missions)
+  - MIA data/missions.json (--missions) -> quests (today's active missions)
+  - optional quests JSON file         ->  quests    (fallback when --missions omitted)
 
 Every source is optional. Missing data renders as an honest empty state
 in the app ("All clear."), never fabricated cards.
@@ -127,6 +128,39 @@ def map_maintenance(m):
     }
 
 
+def load_missions_quests(missions_path, profile_id=None):
+    """Extract today's active quests from MIA's data/missions.json.
+
+    Missions are a flat JSON array (see TheKingCS/MIA core/mission_manager.py).
+    A mission counts as "today's" when it is active, visible to the profile,
+    and either non-recurring or a daily occurrence stamped with today's date.
+    """
+    import datetime
+    missions = load_json(missions_path)
+    if not isinstance(missions, list):
+        return []
+    today = datetime.date.today().isoformat()
+    quests = []
+    for m in missions:
+        if m.get("status") != "active":
+            continue
+        if m.get("profile_id") not in (None, profile_id):
+            continue
+        recurring = m.get("recurring_kind")
+        if recurring == "daily" and m.get("occurrence_key") != today:
+            continue
+        if recurring == "weekly":
+            continue  # weekly occurrences use {start}-W{n} keys; leave to a future pass
+        quests.append({
+            "id": m.get("mission_id"),
+            "area": m.get("region") or "Missions",
+            "title": m.get("name", "Unnamed mission"),
+            "detail": m.get("summary", ""),
+            "xp": m.get("reward_xp", 0),
+        })
+    return quests
+
+
 def load_json(path):
     p = Path(path)
     if not p.is_file():
@@ -140,6 +174,11 @@ def main():
                     help="Path to homestead viewer/dashboard_state.json")
     ap.add_argument("--quests", default=None,
                     help="Path to a quests JSON file (list of {id,title,detail,xp,area})")
+    ap.add_argument("--missions", default=None,
+                    help="Path to MIA data/missions.json — today's active missions "
+                         "become the quest list (takes precedence over --quests)")
+    ap.add_argument("--profile", default=None,
+                    help="MIA profile_id for mission visibility (default: shared only)")
     ap.add_argument("--out", default="webapp/state.json")
     args = ap.parse_args()
 
@@ -155,7 +194,9 @@ def main():
             next_up.append(map_maintenance(m))
 
     quests = []
-    if args.quests:
+    if args.missions:
+        quests = load_missions_quests(args.missions, args.profile)
+    elif args.quests:
         q = load_json(args.quests)
         if isinstance(q, list):
             quests = q
