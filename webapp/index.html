@@ -95,6 +95,24 @@
   .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .note { margin-top: 11px; font-size: 14px; color: var(--xp); }
   .full { font-size: 13px; color: #7193a5; margin-top: 11px; }
+  .headline { font-size: 28px; font-weight: 700; line-height: 1.2; padding: 14px 4px 4px; }
+  .sub { font-size: 16px; color: #a8c8da; padding: 0 4px 12px; }
+  .homebtns { display: flex; gap: 8px; }
+  .hbtn {
+    flex: 1; cursor: pointer; font: inherit; font-size: 16px; font-weight: 600;
+    border-radius: 10px; padding: 12px 10px; border: 1px solid var(--accent);
+    background: transparent; color: #7fd8ff;
+  }
+  .hbtn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .hbtn:focus-visible, .askinput:focus-visible {
+    outline: 2px solid #4fd8ff; outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(79,216,255,.25);
+  }
+  .askinput {
+    width: 100%; font: inherit; font-size: 16px; padding: 12px; color: var(--text);
+    background: var(--panel); border: 1px solid #2b3d49; border-radius: 10px; margin: 0 0 10px;
+  }
+  .chkrow { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--dim); margin: 0 0 12px; }
   .hint { font-size: 11.5px; color: #7193a5; padding-top: 8px; }
 </style>
 </head>
@@ -122,6 +140,15 @@
 /* Embedded fallback so the app renders even if state.json is unreachable. */
 const MOCK = {
   meta: { source: "embedded-fallback" },
+  brief: {
+    greenhouse: "Cell 2: pH 6.9, EC 1.9 \u2014 all in band.",
+    attention: "2 things need you: pH drift high; fish feeder 2 days overdue.",
+    proposals: "1 proposal waiting: Test EC target maximum 1.8 \u2192 2.0.",
+    quests: "2 quests open, 65 XP available.",
+    finance: "October: $1,240 of $2,000 (62%) \u2014 on pace.",
+    workout: "5-day streak. Last: Push day, 42 min.",
+    kitchen: "Pantry: 24 items tracked \u00b7 2 expiring soon."
+  },
   attention: [
     { id: "alert-7", area: "Greenhouse", severity: "critical", title: "pH drift high",
       detail: "Cell 2 (Lettuce Raft) at 7.8 — target 6.8–7.2. Source: cell-2 · 3 occurrences.",
@@ -164,6 +191,8 @@ const MOCK = {
 };
 
 const PAGES = [
+  { key: "answer", label: "MIA", empty: "" },
+  { key: "ask", label: "Ask MIA", empty: "" },
   { key: "attention", label: "Needs attention", empty: "All clear. Nothing needs you." },
   { key: "proposals", label: "Proposals", empty: "No proposals awaiting review." },
   { key: "tracked", label: "Tracked", empty: "Nothing tracked yet." },
@@ -183,6 +212,8 @@ const LS = {
 };
 let decisions = LS.get("decisions", {});
 let doneQuests = LS.get("done", {});
+let pendingAdds = LS.get("pending_adds", []);
+let draftQuest = null;
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -276,6 +307,140 @@ function cardBtn(item, isQuest) {
   return b;
 }
 
+
+const SEV_RANK = { critical: 0, warning: 1, info: 2 };
+const BRIEF_CHIPS = [
+  { key: "attention", area: "Ask MIA", phrase: "\u201CWhat needs me?\u201D" },
+  { key: "greenhouse", area: "Greenhouse", phrase: "\u201CWhat's the greenhouse doing?\u201D" },
+  { key: "finance", area: "Budget", phrase: "\u201CHow's my budget?\u201D" },
+  { key: "workout", area: "Workout", phrase: "\u201CAm I keeping up?\u201D" },
+  { key: "kitchen", area: "Kitchen", phrase: "\u201CWhat's in the pantry?\u201D" },
+  { key: "proposals", area: "Proposals", phrase: "\u201CAny proposals waiting?\u201D" },
+  { key: "quests", area: "Today's quests", phrase: "\u201CWhat are my quests?\u201D" }
+];
+
+/* The answer-first home: exporter sends `answer`; if absent, compute the
+   same result from the sections so the home never disagrees with them. */
+function computeAnswer() {
+  if (STATE.answer && STATE.answer.headline) return STATE.answer;
+  const ranked = [...(STATE.attention || [])].sort((a, b) =>
+    (SEV_RANK[a.severity] ?? 2) - (SEV_RANK[b.severity] ?? 2));
+  let headline, focus = null;
+  if (ranked.length) {
+    const n = ranked.length;
+    headline = n + " thing" + (n === 1 ? "" : "s") + " need" + (n === 1 ? "s" : "") + " you.";
+    focus = { id: ranked[0].id, title: ranked[0].title, area: ranked[0].area };
+  } else headline = "Everything is quiet.";
+  const p = (STATE.proposals || []).filter(x => !decisions[x.id]).length;
+  const q = (STATE.quests || []).filter(x => !doneQuests[x.id]).length;
+  const parts = [];
+  if (p) parts.push(p + " proposal" + (p === 1 ? "" : "s") + " waiting");
+  if (q) parts.push(q + " quest" + (q === 1 ? "" : "s") + " open");
+  return { headline, focus, sub: parts.length ? parts.join(" \u00b7 ") + "." : "No proposals or quests waiting." };
+}
+
+function renderAnswer(box) {
+  const A = computeAnswer();
+  box.append(el("div", "headline", A.headline));
+  if (A.focus) {
+    const item = (STATE.attention || []).find(x => x.id === A.focus.id) || A.focus;
+    const b = el("button", "card sev-" + (item.severity || "info"));
+    b.type = "button";
+    b.append(el("span", "area", item.area || ""));
+    b.append(el("span", "ctitle", item.title || ""));
+    if (item.detail) b.append(el("span", "cdetail", item.detail));
+    const row = el("span", "row");
+    row.append(el("span", "action", "View \u2192"));
+    b.append(row);
+    b.addEventListener("click", () => {
+      page = PAGES.findIndex(p => p.key === "attention");
+      openId = item.id;
+      try { history.pushState({ glanceDetail: item.id }, ""); } catch (e) {}
+      render(true);
+    });
+    box.append(b);
+  } else {
+    box.append(el("div", "sub", "Nothing pending your decision right now."));
+  }
+  box.append(el("div", "sub", A.sub));
+  const btns = el("div", "homebtns");
+  const sec = el("button", "hbtn primary", "Sections \u2192");
+  sec.type = "button";
+  sec.addEventListener("click", () => gotoPage(PAGES.findIndex(p => p.key === "attention")));
+  const ask = el("button", "hbtn", "Ask MIA");
+  ask.type = "button";
+  ask.addEventListener("click", () => gotoPage(1));
+  btns.append(sec); btns.append(ask);
+  box.append(btns);
+}
+
+function renderAsk(box) {
+  box.append(el("div", "sub", "Say it out loud \u2014 or tap a question. Her best questions are printed so you never guess the words."));
+  const brief = STATE.brief || {};
+  for (const chip of BRIEF_CHIPS) {
+    const ans = brief[chip.key];
+    if (!ans) continue;
+    const id = "chip-" + chip.key;
+    const b = el("button", "card sev-info");
+    b.type = "button";
+    b.append(el("span", "area", chip.area));
+    b.append(el("span", "ctitle", chip.phrase));
+    const row = el("span", "row");
+    row.append(el("span", "action", openId === id ? "Close" : "Hear her answer \u2192"));
+    b.append(row);
+    b.addEventListener("click", () => toggleDetail(id));
+    box.append(b);
+    if (openId === id) {
+      const p = el("div", "expand sev-info");
+      p.append(el("div", "dsum", ans));
+      p.append(el("div", "full", "Answered from the exporter's brief \u2014 the same sentence she would speak."));
+      box.append(p);
+    }
+  }
+  box.append(el("div", "sub", "Add a quest"));
+  const input = document.createElement("input");
+  input.className = "askinput"; input.type = "text";
+  input.placeholder = "e.g. Water the seedlings";
+  input.setAttribute("aria-label", "Quest title");
+  const chk = el("label", "chkrow");
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  chk.append(cb); chk.append(document.createTextNode("Daily quest"));
+  const mk = el("button", "btn primary", "Draft quest");
+  mk.type = "button";
+  mk.addEventListener("click", () => {
+    const title = (input.value || "").trim();
+    if (!title) { input.focus(); return; }
+    draftQuest = { title, daily: !!cb.checked, xp: 10 };
+    render(true);
+  });
+  box.append(input); box.append(chk); box.append(mk);
+  if (draftQuest) {
+    const d = el("div", "expand sev-info");
+    d.append(el("span", "tag", "DRAFT QUEST"));
+    d.append(el("div", "dsum", draftQuest.title + " \u00b7 +" + draftQuest.xp + " XP" + (draftQuest.daily ? " \u00b7 daily" : "")));
+    const btns = el("div", "btns");
+    const cf = el("button", "btn primary", "Add quest");
+    cf.type = "button";
+    cf.addEventListener("click", () => {
+      pendingAdds = pendingAdds.concat([draftQuest]);
+      LS.set("pending_adds", pendingAdds);
+      draftQuest = null;
+      render(true);
+    });
+    const cn = el("button", "btn", "Cancel");
+    cn.type = "button";
+    cn.addEventListener("click", () => { draftQuest = null; render(true); });
+    btns.append(cf); btns.append(cn);
+    d.append(btns);
+    box.append(d);
+  }
+  if (pendingAdds.length) {
+    box.append(el("div", "note", pendingAdds.length + " quest" + (pendingAdds.length === 1 ? "" : "s") +
+      " queued on this device \u2014 waiting to sync to MIA's missions."));
+  }
+}
+
 function render(refocus) {
   document.getElementById("summary").textContent = summaryText();
   document.getElementById("pagetitle").textContent = PAGES[page].label;
@@ -285,12 +450,17 @@ function render(refocus) {
   const box = document.getElementById("page");
   box.replaceChildren();
   const pg = PAGES[page];
-  const items = STATE[pg.key] || [];
-  if (!items.length) { box.append(el("div", "empty", pg.empty)); }
-  const isQuest = pg.key === "quests";
-  for (const item of items) {
-    box.append(cardBtn(item, isQuest));
-    if (!isQuest && openId === item.id) box.append(expandPanel(item));
+  document.getElementById("summary").style.display = pg.key === "answer" ? "none" : "";
+  if (pg.key === "answer") renderAnswer(box);
+  else if (pg.key === "ask") renderAsk(box);
+  else {
+    const items = STATE[pg.key] || [];
+    if (!items.length) { box.append(el("div", "empty", pg.empty)); }
+    const isQuest = pg.key === "quests";
+    for (const item of items) {
+      box.append(cardBtn(item, isQuest));
+      if (!isQuest && openId === item.id) box.append(expandPanel(item));
+    }
   }
   if (refocus) {
     const first = box.querySelector(".card, .btn");
@@ -328,6 +498,7 @@ document.getElementById("navNext").addEventListener("click", () => gotoPage(page
 window.addEventListener("popstate", () => { if (openId != null) closeDetail(); });
 
 document.addEventListener("keydown", e => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
   if (e.key === "ArrowRight") { e.preventDefault(); gotoPage(page + 1); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); gotoPage(page - 1); }
   else if (e.key === "Escape") { e.preventDefault(); closeDetail(); }

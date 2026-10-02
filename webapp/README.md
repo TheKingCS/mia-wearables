@@ -6,9 +6,16 @@ platform: a fixed **600×600** additive-light display, D-pad navigation
 design types at 16px body / 20px+ titles with bright, high-contrast color
 on black.
 
-Five sections, **one per screen** — Left/Right flips section, Up/Down
-moves between cards, Enter expands a card in place, Escape (or the
-glasses' Back, which rides browser history) collapses it:
+The app opens on **the answer** — one screen with what matters most
+right now (the exporter's `answer` object: headline, focus card,
+sub-line), or "Everything is quiet." From there:
+
+- **Ask MIA** — her best questions printed as tappable cards, answered
+  from the exporter's `brief` (the same sentences she'd speak), plus a
+  quest composer (draft → confirm → queued on-device as `pending_add`)
+- **The five sections, one per screen** — Left/Right flips page, Up/Down
+  moves between cards, Enter expands a card in place, Escape (or the
+  glasses' Back, which rides browser history) collapses it:
 
 1. **Needs attention** — unresolved homestead alerts
 2. **Proposals** — the real homestead approval queue (see below)
