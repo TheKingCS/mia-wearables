@@ -11,6 +11,9 @@ Builds webapp/state.json for the MIA Glance web app from live sources:
   - homestead mia_homestead.db (--db) ->  proposals (parameter_change_proposals
                                         with status='proposed' — Gate B)
   - MIA data/missions.json (--missions) -> quests (today's active missions)
+  - MIA data dir (--mia-data)         ->  budget / real estate / kitchen /
+                                          workout / property-maintenance
+                                          cards across every section
   - optional quests JSON file         ->  quests    (fallback when --missions omitted)
 
 Proposals are the real homestead approval queue, not stand-ins: Gate A
@@ -247,6 +250,341 @@ def map_tracked_cell(c):
     }
 
 
+# ---------------------------------------------------------------------------
+# Life modules (MIA repo data/ JSON files, --mia-data <path to MIA data dir>)
+#
+# Card mapping (per module):
+#   budget     -> attention: overdue bills, month categories over target
+#                 next_up:   bills due in 7d, ranked top debt ("pay this first")
+#                 tracked:   month pace (income vs expenses) or top category
+#   real_estate-> tracked:   per-property equity + 30-day NOI
+#   kitchen    -> attention: pantry items expiring within 1 day
+#                 tracked:   pantry count (+ expiring count)
+#                 next_up:   unchecked grocery items
+#   workout    -> tracked:   last session + days-since
+#   property   -> attention: overdue maintenance tasks (Appliance/Property/
+#                 Tool assets) + warranty expiring within 30 days
+#                 next_up:   maintenance tasks due within 14 days
+#
+# The MIA managers (core/budget_manager.py etc.) compute richer dates via
+# recurrence anchors (Bill.due_date advanced by recurrence vs last_paid_date).
+# The exporter only reads the stored fields, so bill dates are approximate
+# where a bill recurs and has never been paid. Where the stored data says
+# nothing, the exporter emits no card (no fabrication).
+# ---------------------------------------------------------------------------
+
+def load_list(path):
+    data = load_json(str(Path(path)))
+    return data if isinstance(data, list) else []
+
+
+def _money(x):
+    try:
+        return f"${float(x):,.0f}"
+    except (TypeError, ValueError):
+        return "$?"
+
+
+def map_budget_cards(data_dir, today, attention, next_up, tracked):
+    p = Path(data_dir)
+    bills = load_list(p / "bills.json")
+    expenses = load_list(p / "budget_expenses.json")
+    income = load_list(p / "income.json")
+    targets = load_list(p / "budget_targets.json")
+    debts = load_list(p / "debts.json")
+
+    for b in bills:
+        due = parse_date(b.get("due_date"))
+        name = b.get("name", "Bill")
+        if due is None:
+            continue
+        days = (due - today).days
+        if days < 0:
+            attention.append({
+                "id": f"bill-{b.get('bill_id')}",
+                "area": "Budget",
+                "title": f"{name} is overdue",
+                "detail": f"{_money(b.get('amount'))} — was due {due.isoformat()}.",
+                "severity": "critical",
+                "action": "Open on phone",
+                "proposal": None,
+            })
+        elif days <= 7:
+            next_up.append({
+                "id": f"bill-{b.get('bill_id')}",
+                "area": "Budget",
+                "title": f"{name} due in {days} day{'s' if days != 1 else ''}",
+                "detail": f"{_money(b.get('amount'))} — due {due.isoformat()}.",
+                "severity": "warning" if days <= 2 else "info",
+                "action": "Open on phone",
+            })
+
+    spent_by_cat = {}
+    for e in expenses:
+        d = parse_date(e.get("date"))
+        if d and (d.year, d.month) == (today.year, today.month):
+            spent_by_cat[e.get("category", "Other")] = (
+                spent_by_cat.get(e.get("category", "Other"), 0.0)
+                + float(e.get("amount") or 0))
+    tgt = {}
+    for tg in targets:
+        if (tg.get("entity_id") or "") == "":
+            tgt[tg.get("category", "Other")] = float(tg.get("monthly_amount") or 0)
+    for cat, amt in tgt.items():
+        s = spent_by_cat.get(cat, 0.0)
+        if amt > 0 and s > amt:
+            attention.append({
+                "id": f"budget-over-{cat}",
+                "area": "Budget",
+                "title": f"{cat} over budget",
+                "detail": f"{_money(s)} of {_money(amt)} this month.",
+                "severity": "warning",
+                "action": "Open on phone",
+                "proposal": None,
+            })
+    if spent_by_cat and tgt:
+        worst = max((c for c in spent_by_cat if c in tgt and tgt[c] > 0),
+                    key=lambda c: spent_by_cat[c] / tgt[c], default=None)
+        if worst:
+            tracked.append({
+                "id": f"budget-pace-{worst}",
+                "area": "Budget · this month",
+                "title": (f"{_money(spent_by_cat[worst])} of "
+                          f"{_money(tgt[worst])} — {worst}"),
+                "detail": f"{spent_by_cat[worst] / tgt[worst]:.0%} of the month's budget used.",
+                "severity": "info",
+                "action": "Open on phone",
+                "proposal": None,
+            })
+    elif spent_by_cat:
+        total = sum(spent_by_cat.values())
+        tracked.append({
+            "id": "budget-spent",
+            "area": "Budget · this month",
+            "title": f"{_money(total)} spent this month",
+            "detail": "No budget targets set — pace shows once targets exist.",
+            "severity": "info",
+            "action": "Open on phone",
+            "proposal": None,
+        })
+    total_in = 0.0
+    for i in income:
+        d = parse_date(i.get("date"))
+        if d and (d.year, d.month) == (today.year, today.month):
+            total_in += float(i.get("amount") or 0)
+    if total_in:
+        tracked.append({
+            "id": "budget-income",
+            "area": "Budget · this month",
+            "title": f"{_money(total_in)} in this month",
+            "detail": "Income recorded so far this month.",
+            "severity": "info",
+            "action": "Open on phone",
+            "proposal": None,
+        })
+    if debts:
+        ds = sorted(debts, key=lambda d: -float(d.get("interest_rate") or 0))
+        d0 = ds[0]
+        bal = _money(d0.get("balance"))
+        apr = f"{d0.get('interest_rate')}%" if d0.get("interest_rate") is not None else "?"
+        next_up.append({
+            "id": f"debt-{d0.get('debt_id')}",
+            "area": "Budget · debts",
+            "title": f"Pay {d0.get('name')} first",
+            "detail": f"{bal} at {apr} APR — highest rate of {len(debts)} debts.",
+            "severity": "info",
+            "action": "Open on phone",
+        })
+
+
+def map_real_estate_cards(data_dir, today, tracked):
+    p = Path(data_dir)
+    props = load_list(p / "properties.json")
+    if not props:
+        return
+    exps = load_list(p / "budget_expenses.json")
+    incs = load_list(p / "income.json")
+    lo = today - dt.timedelta(days=30)
+    for pr in props:
+        pid = pr.get("property_id")
+        name = pr.get("name", "Property")
+        bits = []
+        try:
+            ev = float(pr.get("current_value") or 0) - float(pr.get("mortgage_balance") or 0)
+            if ev:
+                bits.append(f"equity {_money(ev)}")
+        except (TypeError, ValueError):
+            pass
+        noi = 0.0
+        for e in exps:
+            d = parse_date(e.get("date"))
+            if e.get("property_id") == pid and d and lo <= d <= today:
+                noi -= float(e.get("amount") or 0)
+        for i in incs:
+            d = parse_date(i.get("date"))
+            if i.get("property_id") == pid and d and lo <= d <= today:
+                noi += float(i.get("amount") or 0)
+        if noi:
+            bits.append(f"NOI {_money(noi)} last 30 days")
+        tracked.append({
+            "id": f"prop-{pid}",
+            "area": "Real estate",
+            "title": name,
+            "detail": " · ".join(bits) + ("." if bits else ""),
+            "severity": "info",
+            "action": "Open on phone",
+            "proposal": None,
+        })
+
+
+def map_kitchen_cards(data_dir, today, attention, next_up, tracked):
+    p = Path(data_dir)
+    pantry = load_list(p / "kitchen_pantry.json")
+    soon, expiring = [], 0
+    for it in pantry:
+        exp = it.get("expiration_date")
+        if not exp:
+            continue
+        d = parse_date(exp)
+        if d is None:
+            continue
+        days = (d - today).days
+        if days <= 1:
+            soon.append(it.get("name", "item"))
+            expiring += 1
+    if soon:
+        attention.append({
+            "id": "pantry-expiring",
+            "area": "Kitchen",
+            "title": "Use up soon",
+            "detail": ", ".join(soon[:4]) + (f" +{len(soon) - 4} more"
+                                            if len(soon) > 4 else "") + ".",
+            "severity": "warning",
+            "action": "Open on phone",
+            "proposal": None,
+        })
+    grocery = [g for g in load_list(p / "kitchen_grocery_list.json")
+               if not g.get("checked")]
+    if grocery:
+        names = [g.get("name", "") for g in grocery]
+        next_up.append({
+            "id": "grocery-list",
+            "area": "Kitchen",
+            "title": f"{len(grocery)} grocery item{'s' if len(grocery) != 1 else ''}",
+            "detail": ", ".join(n for n in names[:4] if n)
+                      + (f" +{len(names) - 4} more" if len(names) > 4 else "") + ".",
+            "severity": "info",
+            "action": "Open on phone",
+        })
+    if pantry:
+        tracked.append({
+            "id": "pantry-count",
+            "area": "Kitchen",
+            "title": (f"Pantry: {len(pantry)} items tracked"
+                      + (f" · {expiring} expiring soon" if expiring else "")),
+            "detail": "Counted from your pantry list.",
+            "severity": "info",
+            "action": "Open on phone",
+            "proposal": None,
+        })
+
+
+def map_workout_cards(data_dir, today, tracked):
+    p = Path(data_dir)
+    sessions = load_list(p / "workout_sessions.json")
+    if not sessions:
+        return
+    templates = {t_.get("template_id"): t_.get("name", "")
+                 for t_ in load_list(p / "workout_templates.json")}
+    last, last_date = None, None
+    for s in sessions:
+        d = parse_date(s.get("date"))
+        if d and (last_date is None or d > last_date):
+            last_date, last = d, s
+    if last is None:
+        return
+    days = (today - last_date).days
+    name = templates.get(last.get("template_id"), "Freeform")
+    bits = [f"Last: {name}" if name else "Last session"]
+    if last.get("duration_minutes"):
+        bits.append(f"{last['duration_minutes']} min")
+    bits.append("today" if days == 0 else
+                ("yesterday" if days == 1 else f"{days} days ago"))
+    tracked.append({
+        "id": "workout-last",
+        "area": "Workout",
+        "title": " · ".join(bits),
+        "detail": ("Streak from recurring fitness missions "
+                   "shows in Today's quests."),
+        "severity": "warning" if days >= 3 else "info",
+        "action": "Open on phone",
+        "proposal": None,
+    })
+
+
+PROPERTY_CATEGORIES = ("Appliance", "Property", "Tool")
+
+
+def map_property_cards(data_dir, today, attention, next_up):
+    p = Path(data_dir)
+    assets = {a.get("asset_id"): a for a in load_list(p / "maintenance.json")
+              if isinstance(a, dict)}
+    tasks = [t_ for t_ in load_list(p / "maintenance_tasks.json")
+             if isinstance(t_, dict)] if (p / "maintenance_tasks.json").is_file() else []
+    if not tasks:
+        # maintenance.json may hold {"assets":[...],"tasks":[...]}
+        raw = load_json(str(p / "maintenance.json"))
+        if isinstance(raw, dict):
+            assets = {a.get("asset_id"): a for a in raw.get("assets", [])}
+            tasks = raw.get("tasks", [])
+    for t_ in tasks:
+        a = assets.get(t_.get("asset_id"), {})
+        if a.get("category") not in PROPERTY_CATEGORIES:
+            continue
+        last = parse_date(t_.get("last_completed"))
+        interval = t_.get("interval_days")
+        title = t_.get("title", "Maintenance task")
+        aname = a.get("name", "")
+        if interval and last:
+            due = last + dt.timedelta(days=int(interval))
+            days = (due - today).days
+            if days < 0:
+                attention.append({
+                    "id": f"maint-task-{t_.get('task_id')}",
+                    "area": "Property",
+                    "title": f"{title}: {aname}",
+                    "detail": f"Overdue {-days} day{'s' if -days != 1 else ''} "
+                              f"(was due {due.isoformat()}).",
+                    "severity": "critical",
+                    "action": "Open on phone",
+                    "proposal": None,
+                })
+            elif days <= 14:
+                next_up.append({
+                    "id": f"maint-task-{t_.get('task_id')}",
+                    "area": "Property",
+                    "title": f"{title}: {aname}",
+                    "detail": f"Due in {days} day{'s' if days != 1 else ''} ({due.isoformat()}).",
+                    "severity": "warning" if days <= 3 else "info",
+                    "action": "Open on phone",
+                })
+    for a in assets.values():
+        if a.get("category") not in PROPERTY_CATEGORIES:
+            continue
+        wu = parse_date(a.get("warranty_until"))
+        if wu:
+            days = (wu - today).days
+            if 0 <= days <= 30:
+                attention.append({
+                    "id": f"warranty-{a.get('asset_id')}",
+                    "area": "Property",
+                    "title": f"Warranty ending: {a.get('name', '')}",
+                    "detail": f"Coverage ends in {days} day{'s' if days != 1 else ''} ({wu.isoformat()}).",
+                    "severity": "warning",
+                    "action": "Open on phone",
+                    "proposal": None,
+                })
+
 def load_missions_quests(missions_path, profile_id=None):
     """Extract today's active quests from MIA's data/missions.json.
 
@@ -299,6 +637,10 @@ def main():
     ap.add_argument("--missions", default=None,
                     help="Path to MIA data/missions.json — today's active missions "
                          "become the quest list (takes precedence over --quests)")
+    ap.add_argument("--mia-data", default=None,
+                    help="Path to MIA's data/ directory — budget, real estate, "
+                         "kitchen, workout, and property-maintenance cards "
+                         "(reads the module JSON files directly)")
     ap.add_argument("--profile", default=None,
                     help="MIA profile_id for mission visibility (default: shared only)")
     ap.add_argument("--out", default="webapp/state.json")
@@ -328,6 +670,13 @@ def main():
     if args.db:
         for r in load_gate_b_proposals(args.db):
             proposals.append(map_param_change_proposal(r, cell_names, hypotheses))
+    if args.mia_data:
+        _today = dt.date.today()
+        map_budget_cards(args.mia_data, _today, attention, next_up, tracked)
+        map_real_estate_cards(args.mia_data, _today, tracked)
+        map_kitchen_cards(args.mia_data, _today, attention, next_up, tracked)
+        map_workout_cards(args.mia_data, _today, tracked)
+        map_property_cards(args.mia_data, _today, attention, next_up)
 
     quests = []
     if args.missions:
@@ -345,7 +694,7 @@ def main():
 
     state = {
         "meta": {
-            "source": "live" if dash else "mock",
+            "source": "live" if (dash or args.mia_data) else "mock",
             "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
             "dashboard_generated_at": dash_generated,
             "note": "Generated by tools/export_glance_state.py from homestead state.",

@@ -43,6 +43,7 @@ python tools/export_glance_state.py \
   --dashboard /path/to/mia-homestead/viewer/dashboard_state.json \
   --db /path/to/mia-homestead/mia_homestead.db \
   --missions /path/to/MIA/data/missions.json \
+  --mia-data /path/to/MIA/data \
   --out webapp/state.json
 ```
 
@@ -52,6 +53,10 @@ python tools/export_glance_state.py \
   `proposed` (direct DB read via `--db`)
 - **tracked** ← per-cell latest sensor readings from the dashboard JSON
 - **next_up** ← open maintenance tasks (overdue computed from `due_date`)
+- **life modules** ← MIA's `data/` dir (`--mia-data`): over-budget and
+  overdue-bill attention, budget pace, property equity/NOI, expiring
+  pantry, groceries, last workout, overdue maintenance. Card map in
+  `docs/life-modules-card-map.md`.
 - **quests** ← today's active MIA missions (`--missions`; falls back to a
   `--quests` JSON file)
 
