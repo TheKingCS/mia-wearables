@@ -217,6 +217,36 @@ def map_maintenance(m):
     }
 
 
+def map_tracked_cell(c):
+    """A 'quietly good' cell snapshot for the Tracked section."""
+    readings = (c.get("readings") or []) if isinstance(c, dict) else []
+    bits, stale = [], False
+    for r in readings:
+        if not isinstance(r, dict):
+            continue
+        label = (r.get("type") or "").replace("_", " ")
+        label = {"ph": "pH", "ec": "EC"}.get(label, label)
+        if r.get("value") is not None:
+            unit = (r.get("unit") or "").replace("mS/cm", "").strip()
+            if unit and not unit.startswith("°"):
+                unit = " " + unit
+            bits.append(f"{label} {r['value']}{unit}")
+        if r.get("is_stale"):
+            stale = True
+    name = c.get("name") or f"Cell {c.get('id')}"
+    return {
+        "id": f"cell-{c.get('id')}",
+        "area": "Greenhouse",
+        "title": " · ".join(bits) if bits else name,
+        "detail": (f"{name} — latest readings"
+                   + (" (some readings stale)." if stale else ", in band.")
+                   if bits else ""),
+        "severity": "warning" if stale else "info",
+        "action": "Open twin",
+        "proposal": None,
+    }
+
+
 def load_missions_quests(missions_path, profile_id=None):
     """Extract today's active quests from MIA's data/missions.json.
 
@@ -276,7 +306,7 @@ def main():
 
     dash = load_json(args.dashboard) if args.dashboard else None
 
-    attention, next_up, proposals = [], [], []
+    attention, next_up, proposals, tracked = [], [], [], []
     dash_generated = None
     cell_names, hypotheses = {}, {}
     if dash:
@@ -284,6 +314,8 @@ def main():
         for c in dash.get("cells", []) or []:
             if isinstance(c, dict) and c.get("id") is not None:
                 cell_names[c["id"]] = c.get("name") or f"Cell {c['id']}"
+                if c.get("readings"):
+                    tracked.append(map_tracked_cell(c))
         for a in dash.get("alerts", []) or []:
             attention.append(map_alert(a))
         for m in dash.get("maintenance", []) or []:
@@ -320,6 +352,7 @@ def main():
         },
         "attention": attention,
         "proposals": proposals,
+        "tracked": tracked,
         "next_up": next_up,
         "quests": quests,
     }
@@ -327,7 +360,8 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(state, indent=2))
     print(f"Wrote {out}: {len(attention)} attention, {len(proposals)} proposals, "
-          f"{len(next_up)} next-up, {len(quests)} quests (source={state['meta']['source']}).")
+          f"{len(tracked)} tracked, {len(next_up)} next-up, "
+          f"{len(quests)} quests (source={state['meta']['source']}).")
 
 
 if __name__ == "__main__":

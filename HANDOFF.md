@@ -84,21 +84,36 @@ Notes:
 4. Real quests: `--missions` pulls today's active MIA missions (title,
    region, summary, XP).
 5. Demo seeder for the homestead DB.
+6. **Platform pass (2026-10-01 night):** rebuilt `webapp/index.html` to
+   Meta's Web Apps spec — fixed 600×600 viewport meta +
+   `mrbd-web-app-capable`, five paged sections (Left/Right flips,
+   Up/Down moves, Enter expands in place, native Back collapses via
+   history), 16px/20px type minimums, visible cyan focus ring,
+   grounding summary line, and a new **Tracked** section (exporter:
+   per-cell latest readings from dashboard `cells[]`). Added
+   `tools/make_icon.py` (stdlib PNG icon generator).
 
 ## What's next (in this order)
 
-1. **Proposal write-back.** Approvals currently persist in browser
+1. **Icon PNG:** run `python tools/make_icon.py` once on the laptop, then
+   flip `appearance.icon.src` in
+   `webapp/.well-known/meta-wearables-manifest.json` to `../icon.png`.
+2. **On-device validation:** host over HTTPS (Cloudflare quick tunnel),
+   Meta AI app → App Settings → Apps → Web Apps → Connect Web App → URL.
+   Check: spatial focus order, focus visible near edges, activation
+   fires once, readable over bright/dark surroundings, Back returns to
+   the native boundary. Note layout/scroll/readability issues.
+3. **Simulator pass:** Meta Ray-Ban Display Simulator Chrome extension —
+   600×600 frame, bright/dark scenes, quality checklist.
+4. **Proposal write-back.** Approvals currently persist in browser
    localStorage only. Build a small authenticated endpoint on the homestead
    side that calls `start_experiment()` / `approve_parameter_change()` /
    `deny_parameter_change()` from `core/experiment_manager.py`, and have the
    app POST decisions there. Safety rule stands: approval changes the
    *target*; the Safety MCU's hard limits still gate every dose.
-2. **Windows Scheduled Task** running steps 1–2 every few minutes.
-3. **Stable HTTPS hosting** to replace the Cloudflare quick tunnel.
-4. **Meta AI app / Developer Mode** — still blocked (app stuck loading
-   account). Then: verify manifest over HTTPS from the phone, load Glance
-   on the Ray-Ban Display, record layout/scroll/focus/Back behavior.
-5. **Voice interaction** (Phase 3): map voice queries to MIA tools.
+5. **Windows Scheduled Task** running the export pipeline every few minutes.
+6. **Stable HTTPS hosting** to replace the Cloudflare quick tunnel.
+7. **Voice interaction** (Phase 2): map voice queries to MIA tools.
 
 ## Gotchas learned the hard way
 
@@ -106,6 +121,8 @@ Notes:
 - Complex quoting breaks; prefer committed `.py` files over long one-liners.
 - `sqlite3.OperationalError: no such table` → the schema wasn't applied.
 - Cloudflare quick-tunnel URLs change on every restart.
-- The Meta AI Android app (Oct 2026) gets stuck on account loading; the
+- The Meta AI Android app (Oct 2026) got stuck on account loading;
+  Developer Mode is working as of 2026-10-01 (Zac confirmed) — keep the
+  clear-storage/reinstall steps in mind if it recurs.
   "tap version 5 times" trick is unverified for the current build.
 - Never ask Zac to paste tokens/secrets into chat.

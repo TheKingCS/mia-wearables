@@ -1,98 +1,96 @@
-# MIA Glance — web app prototype (Phase 1)
+# MIA Glance — web app (Phase 1)
 
-Glanceable MIA cards for Meta Ray-Ban Display: **Needs attention**,
-**Next up**, and **Today's quests** — the approved Phase 1 card set.
-Built to the current Web Apps spec: Chromium runtime, responsive layout
-(600×600 is the validation target, never a hardcoded size), directional
-navigation (↑↓ + Enter), manifest at
-`.well-known/meta-wearables-manifest.json`.
+Glanceable MIA cards for Meta Ray-Ban Display, shaped to Meta's Web Apps
+platform: a fixed **600×600** additive-light display, D-pad navigation
+(touchpad/Neural Band arrive as arrow keys + Enter), no mouse/touch, and
+design types at 16px body / 20px+ titles with bright, high-contrast color
+on black.
 
-## Preview it now (no glasses needed)
+Five sections, **one per screen** — Left/Right flips section, Up/Down
+moves between cards, Enter expands a card in place, Escape (or the
+glasses' Back, which rides browser history) collapses it:
 
-```bash
-cd webapp
-python3 -m http.server 8080      # Windows: py -m http.server 8080
-# open http://localhost:8080/ in Chrome
-```
+1. **Needs attention** — unresolved homestead alerts
+2. **Proposals** — the real homestead approval queue (see below)
+3. **Tracked** — cell sensor snapshots that are quietly in band
+4. **Next up** — open maintenance tasks
+5. **Today's quests** — today's active MIA missions
 
-- Open DevTools responsive mode at **600×600** to approximate the Display.
-- Use **↑/↓** to move between cards, **Enter** to select / check in a quest.
-- Quest check-ins persist in `localStorage`.
+An always-visible summary line grounds the glance: *"2 things need you ·
+2 proposals waiting · 2 quests open · all else quiet."*
 
-## Files
+## Platform compliance baked in
 
-- `index.html` — the whole app (no build step, no dependencies)
-- `state.json` — card data; the app falls back to embedded data if the fetch fails
-- `.well-known/meta-wearables-manifest.json` — Version 1 manifest (name, description, monochrome icon, theme + gradient)
-- `icon.svg` — transparent monochrome artwork (64×64 design area)
+- `<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">`
+  and `<meta name="mrbd-web-app-capable" content="yes">`
+- Every interactive element is a real button with a visible cyan focus ring
+- Detail expansion uses `history.pushState` so native Back collapses it
+- State re-fetches `state.json` every 60s (**R** refreshes manually)
+- Decisions and quest check-ins persist in `localStorage` (guarded)
+- Manifest at `.well-known/meta-wearables-manifest.json` (name,
+  description, monochrome artwork, theme + gradient)
+- `tools/make_icon.py` renders `icon.png` (256×256 PNG ≥ the 52px toolkit
+  minimum; SVGs aren't supported for favicons). Run it once, then flip
+  the manifest's `appearance.icon.src` to `../icon.png`.
 
 ## Live data: the exporter
 
-`tools/export_glance_state.py` builds `webapp/state.json` from the real
-homestead export — no mock data, no guessing:
+`tools/export_glance_state.py` builds `webapp/state.json` from real
+sources — no mock data, no guessing:
 
 ```bash
 python tools/export_glance_state.py \
   --dashboard /path/to/mia-homestead/viewer/dashboard_state.json \
-  --quests tools/quests.json \
+  --db /path/to/mia-homestead/mia_homestead.db \
+  --missions /path/to/MIA/data/missions.json \
   --out webapp/state.json
 ```
 
-- **attention** ← unresolved homestead alerts (severity → card strip,
-  source/last-seen/repeat count → detail)
-- **next_up** ← open homestead maintenance tasks (priority → severity,
-  overdue computed from `due_date`, bumped to warning when overdue)
-- **quests** ← your quests JSON file (copy `tools/quests.example.json`
-  to start); if omitted, existing quests in `state.json` are preserved
+- **attention** ← unresolved homestead alerts
+- **proposals** ← Gate A: `experiments` with status `proposed`
+  (dashboard JSON); Gate B: `parameter_change_proposals` with status
+  `proposed` (direct DB read via `--db`)
+- **tracked** ← per-cell latest sensor readings from the dashboard JSON
+- **next_up** ← open maintenance tasks (overdue computed from `due_date`)
+- **quests** ← today's active MIA missions (`--missions`; falls back to a
+  `--quests` JSON file)
 
-Every source is optional — missing data renders as an honest "All clear."
-Re-run the exporter (or schedule it) and reload the app to refresh.
-MIA-core sources (garage maintenance, missions) plug in here next.
+Every source is optional — missing data renders as an honest empty state,
+never fabricated cards.
 
-## Proposal approval (read / propose / approve)
+## Proposals (read / propose / approve)
 
-Tapping (or Enter on) an attention card opens a detail view. Cards that
-carry a `proposal` show what MIA proposes, the evidence behind it, and a
-safety note — with **Approve** / **Dismiss** buttons navigable by ↑↓ and
-Enter (Esc or ← Back returns to the list). Decisions persist in
-`localStorage` and the card shows its decided state.
-
-Approvals are **preview-only** in this prototype: in production they will
-queue with the homestead controller and Safety MCU. Nothing actuates
-from glasses — the safety note on every proposal says so.
-
-`tools/export_glance_state.py` attaches a demo proposal to pH alerts
-(`demo: true`); real proposals will come from the homestead
-experiment/proposal queue.
+Proposal cards carry the homestead's real queue: hypothesis, evidence,
+yield rationale, and a safety note — *approval changes the target the
+control loop aims for; every dose still passes the Safety MCU's hard
+limits.* Approving writes to `localStorage` only until the homestead
+write-back endpoint exists; nothing actuates from the glasses.
 
 ## Hosting for the glasses
 
-The glasses need the app over **HTTPS** (plain `http://` is only accepted
-for loopback hosts like `localhost`). Quickest path on Windows:
+The glasses need **HTTPS** (plain http only works for loopback). Quickest
+path on Windows: serve `webapp/` with `python -m http.server 8080`, then
+`.\cloudflared-windows-amd64.exe tunnel --url http://localhost:8080` and
+use the printed `https://….trycloudflare.com` URL. Quick-tunnel URLs
+change on every restart; fine for testing.
 
-1. Download `cloudflared` (64-bit .exe) from
-   <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>
-2. In a second terminal (keep the `http.server` running):
-   `.\cloudflared-windows-amd64.exe tunnel --url http://localhost:8080`
-3. Use the printed `https://….trycloudflare.com` URL — the manifest is
-   served automatically at `<url>/.well-known/meta-wearables-manifest.json`
+To load: Meta AI app → **App Settings** → **Apps** → **Web Apps** →
+**Connect Web App** → enter the HTTPS URL → **Save**. The app appears at
+the bottom of the app grid on the glasses.
 
-The trycloudflare URL changes on every restart; fine for testing.
+For desktop iteration, Meta's **Ray-Ban Display Simulator** Chrome
+extension gives a 600×600 frame with additive blending, bright/dark
+scene previews, directional controls, and a quality checklist (viewport
+metadata, focus targets, horizontal overflow, visible focus styles).
 
-## Loading onto the glasses
+Validate on the real glasses: every critical control reachable in a
+sensible spatial order; focus visible near display edges; activation
+fires once; content readable over bright and dark surroundings;
+overflow intentional; Back returns to the native app boundary.
 
-1. Meta AI app on the paired phone → enable **Developer Mode** (tap the
-   app version 5 times).
-2. Load the hosted HTTPS URL as a web app.
+## Rules this app follows
 
-If the Meta AI app hangs while loading account/Instagram info: update the
-app, then force-stop and **clear storage** (Settings → Apps → Meta AI →
-Storage → Clear data), reopen and log in fresh; reinstall as a last resort.
-This only blocks on-glass loading — hosting and preview work regardless.
-
-## Rules this prototype follows
-
-- Read + propose, never actuate: cards link to approvals and detail on
-  the phone; no control actions originate here.
+- Read + propose, never actuate: no control actions originate here.
 - Glanceable on glass: big type, minimal text, severity at a glance.
+- Full detail lives on phone/desktop; the glasses stay glanceable.
 - Offline-tolerant: embedded fallback state if the fetch fails.

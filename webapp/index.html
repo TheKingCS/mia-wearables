@@ -1,201 +1,120 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="description" content="MIA Glance — glanceable MIA cards for Meta Ray-Ban Display: needs attention, proposals, tracked, next up, and today's quests.">
 <title>MIA Glance</title>
+<link rel="icon" type="image/png" href="icon.png">
 <style>
-  * { box-sizing: border-box; }
-  html, body, #app { inline-size: 100%; block-size: 100%; }
+  :root {
+    --bg: #000; --panel: #0d1419; --panel2: #0a1116;
+    --line: #22303a; --text: #f2f8fc; --dim: #c2d7e2; --faint: #8fb6c9;
+    --accent: #3ec6ff; --accent-ink: #06121a;
+    --critical: #ff5a4e; --warning: #ffb02e; --info: #3ec6ff;
+    --xp: #ffd166; --ok: #a5d98f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
   body {
-    margin: 0;
-    min-inline-size: 0;
-    background: #000;
-    color: #eaf3ec;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    -webkit-font-smoothing: antialiased;
+    width: 600px; height: 600px; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  .app-shell {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    inline-size: 100%;
-    block-size: 100%;
-    overflow: hidden;
-    background: radial-gradient(120% 90% at 50% 0%, #0b1f14 0%, #050a07 60%, #000 100%);
+  .app { display: flex; flex-direction: column; height: 600px; padding: 18px 20px 14px; }
+  .topbar { display: flex; justify-content: space-between; align-items: baseline; }
+  .brand { font-size: 20px; font-weight: 700; letter-spacing: .06em; }
+  .clock { font-size: 17px; color: #a8c8da; font-variant-numeric: tabular-nums; }
+  .status { font-size: 12px; letter-spacing: .1em; color: var(--accent); margin-top: 6px; }
+  .xpbar { height: 5px; border-radius: 3px; background: #16202a; margin: 8px 0 10px; overflow: hidden; }
+  .xpfill { width: 62%; height: 100%; background: var(--accent); border-radius: 3px; }
+  .summary { font-size: 17px; line-height: 1.4; color: #d7e8f2; min-height: 24px; }
+  .pagehead { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; }
+  .nav {
+    cursor: pointer; font: inherit; font-size: 24px; line-height: 1; width: 38px; height: 38px;
+    border-radius: 50%; border: 1px solid #2b3d49; background: var(--panel); color: var(--accent);
   }
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 3.5vmin 5vmin 2vmin;
+  .nav:focus-visible, .card:focus-visible, .btn:focus-visible {
+    outline: 2px solid #4fd8ff; outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(79,216,255,.25);
   }
-  .brand {
-    display: flex; align-items: center; gap: 2.5vmin;
-    font-weight: 800; letter-spacing: 0.14em; font-size: 4.2vmin;
-  }
-  .brand svg { inline-size: 6vmin; block-size: 6vmin; }
-  .clock { font-size: 4.2vmin; font-weight: 600; color: #9fd8b4; font-variant-numeric: tabular-nums; }
-  .content {
-    min-inline-size: 0; min-block-size: 0;
-    overflow-y: auto;
-    padding: 0 5vmin 4vmin;
-    scrollbar-width: none;
-  }
-  .content::-webkit-scrollbar { display: none; }
-  section { margin-block-start: 3.5vmin; }
-  section:first-child { margin-block-start: 1vmin; }
-  h2 {
-    margin: 0 0 2vmin;
-    font-size: 3.4vmin; font-weight: 700;
-    letter-spacing: 0.18em; text-transform: uppercase;
-    color: #8fd0a4;
-  }
-  .cards { display: grid; gap: 2.4vmin; }
+  .pagetitle { flex: 1; text-align: center; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
+  .dots { display: flex; justify-content: center; gap: 6px; margin: 4px 0 8px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #2b3d49; }
+  .dot.on { background: var(--accent); }
+  .page { flex: 1; overflow-y: auto; scrollbar-width: none; }
+  .page::-webkit-scrollbar { display: none; }
   .card {
-    --sev: #35d07f;
-    appearance: none; border: 1px solid rgba(255,255,255,0.09);
-    border-inline-start: 1.4vmin solid var(--sev);
-    background: rgba(255,255,255,0.045);
-    border-radius: 3vmin;
-    padding: 3vmin 4vmin;
-    text-align: start; color: inherit;
-    cursor: pointer; inline-size: 100%;
-    display: grid; gap: 1.2vmin;
-    font-family: inherit;
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--info);
+    color: var(--text); border-radius: 12px; padding: 12px 14px; margin: 0 0 10px; font: inherit;
   }
-  .card.sev-critical { --sev: #ff5f5f; }
-  .card.sev-warning  { --sev: #ffb020; }
-  .card.sev-info     { --sev: #35d07f; }
-  .card:focus { outline: none; }
-  .card:focus-visible {
-    outline: 0.8vmin solid #35d07f;
-    outline-offset: 0.6vmin;
-    background: rgba(53,208,127,0.10);
-  }
-  .area {
-    font-size: 3vmin; font-weight: 700; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--sev);
-  }
-  .title { font-size: 5vmin; font-weight: 750; line-height: 1.15; }
-  .detail { font-size: 3.6vmin; line-height: 1.4; color: #c3d4c8; }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 2vmin; }
-  .action { font-size: 3.6vmin; font-weight: 700; color: #eaf3ec; }
-  .xp {
-    font-size: 3.2vmin; font-weight: 800; color: #07130c;
-    background: #35d07f; border-radius: 999px; padding: 1vmin 2.6vmin;
-    white-space: nowrap;
-  }
-  .card.done { opacity: 0.55; }
-  .card.done .title { text-decoration: line-through; }
+  .card.sev-critical { border-left-color: var(--critical); }
+  .card.sev-warning { border-left-color: var(--warning); }
+  .card.sev-info { border-left-color: var(--info); }
+  .card.decided { opacity: .7; }
+  .area { display: block; font-size: 11px; letter-spacing: .16em; color: var(--faint); text-transform: uppercase; }
+  .ctitle { display: block; font-size: 20px; font-weight: 600; margin-top: 3px; line-height: 1.25; }
+  .cdetail { display: block; font-size: 16px; color: var(--dim); margin-top: 4px; line-height: 1.4; }
+  .row { display: flex; justify-content: space-between; align-items: center; margin-top: 9px; }
+  .action { font-size: 15px; color: var(--accent); font-weight: 600; }
+  .xp { font-size: 15px; color: var(--xp); font-weight: 700; }
   .check {
-    inline-size: 5vmin; block-size: 5vmin; border-radius: 50%;
-    border: 0.7vmin solid #35d07f; flex: none;
-    display: inline-grid; place-items: center;
-    color: #07130c; font-weight: 900; font-size: 3.4vmin;
+    display: inline-block; width: 19px; height: 19px; border-radius: 50%;
+    border: 2px solid var(--accent); vertical-align: -4px; margin-right: 8px; position: relative;
   }
-  .card.done .check { background: #35d07f; }
-  .allclear {
-    border: 1px dashed rgba(255,255,255,0.18);
-    border-radius: 3vmin; padding: 3vmin 4vmin;
-    color: #9fd8b4; font-size: 4vmin;
+  .check.done { background: var(--accent); border-color: var(--accent); }
+  .check.done::after {
+    content: ""; position: absolute; left: 5.5px; top: 2.5px; width: 5px; height: 9.5px;
+    border: solid var(--accent-ink); border-width: 0 2.5px 2.5px 0; transform: rotate(45deg);
   }
-  .hint {
-    padding: 2vmin 5vmin 3.5vmin;
-    font-size: 3.2vmin; color: #7d9384; text-align: center;
+  .empty { color: var(--faint); font-size: 16px; padding: 26px 6px; text-align: center; }
+  .expand {
+    background: var(--panel2); border: 1px solid var(--line); border-left: 5px solid var(--info);
+    border-radius: 12px; padding: 14px; margin: -2px 0 12px;
   }
-  .live-dot { color: #ffb020; }
-  .sev-critical { --sev: #ff5f5f; }
-  .sev-warning  { --sev: #ffb020; }
-  .sev-info     { --sev: #35d07f; }
-  /* Proposal detail overlay (read / propose / approve). */
-  .overlay[hidden] { display: none; }
-  .overlay {
-    position: fixed; inset: 0; z-index: 10;
-    background: rgba(0,0,0,0.78);
-    display: grid; place-items: center;
-    padding: 5vmin;
+  .expand.sev-critical { border-left-color: var(--critical); }
+  .expand.sev-warning { border-left-color: var(--warning); }
+  .tag {
+    display: inline-block; font-size: 11px; letter-spacing: .14em; color: var(--accent-ink);
+    background: #7fd8ff; border-radius: 4px; padding: 2px 7px; font-weight: 700; margin-bottom: 9px;
   }
-  .detail-card {
-    --sev: #35d07f;
-    inline-size: 100%; max-block-size: 100%; overflow-y: auto;
-    scrollbar-width: none;
-    background: #0a140e;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-inline-start: 1.4vmin solid var(--sev);
-    border-radius: 3vmin; padding: 4vmin;
-    display: grid; gap: 2.2vmin; align-content: start;
-  }
-  .detail-card::-webkit-scrollbar { display: none; }
-  .ev { margin: 0; padding-inline-start: 5vmin; color: #c3d4c8; font-size: 3.6vmin; display: grid; gap: 1.2vmin; }
+  .dsum { font-size: 16px; color: #d7e8f2; line-height: 1.45; }
+  .ev { margin: 11px 0 0; padding-left: 19px; font-size: 15px; color: #b4cdd9; line-height: 1.55; }
   .safety {
-    border-inline-start: 1vmin solid #ffb020;
-    padding: 2vmin 3vmin; color: #ffd9a0; font-size: 3.4vmin; line-height: 1.4;
-    background: rgba(255,176,32,0.08); border-radius: 2vmin;
+    margin-top: 13px; font-size: 14px; color: var(--ok); background: #14210d;
+    border: 1px solid #2c4520; border-radius: 8px; padding: 10px 12px; line-height: 1.5;
   }
-  .preview-tag {
-    font-size: 3vmin; font-weight: 800; letter-spacing: 0.14em;
-    color: #07130c; background: #ffb020; border-radius: 999px;
-    padding: 1vmin 2.6vmin; justify-self: start;
-  }
-  .detail-actions { display: grid; gap: 2vmin; margin-block-start: 1vmin; }
+  .btns { display: flex; gap: 8px; margin-top: 15px; flex-wrap: wrap; }
   .btn {
-    appearance: none; border: 1px solid rgba(255,255,255,0.14);
-    background: rgba(255,255,255,0.06); color: #eaf3ec;
-    border-radius: 3vmin; padding: 3vmin;
-    font-size: 4.4vmin; font-weight: 750; font-family: inherit;
-    cursor: pointer; text-align: center; inline-size: 100%;
+    flex: 1; min-width: 100px; cursor: pointer; font: inherit; font-size: 16px; font-weight: 600;
+    border-radius: 10px; padding: 12px 10px; border: 1px solid var(--accent);
+    background: transparent; color: #7fd8ff;
   }
-  .btn.primary { background: #35d07f; color: #07130c; border-color: transparent; }
-  .btn:focus-visible { outline: 0.8vmin solid #35d07f; outline-offset: 0.6vmin; }
-  .detail-note { font-size: 3.8vmin; color: #9fd8b4; text-align: center; }
-  .card.decided { opacity: 0.6; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .note { margin-top: 11px; font-size: 14px; color: var(--xp); }
+  .full { font-size: 13px; color: #7193a5; margin-top: 11px; }
+  .hint { font-size: 11.5px; color: #7193a5; padding-top: 8px; }
 </style>
 </head>
 <body>
-<div id="app" class="app-shell">
-  <header class="topbar">
-    <div class="brand">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><g fill="#35d07f"><circle cx="47" cy="8" r="5"/><rect x="12" y="36" width="10" height="16" rx="5"/><rect x="27" y="26" width="10" height="26" rx="5"/><rect x="42" y="16" width="10" height="36" rx="5"/></g></svg>
-      <span>MIA&nbsp;Glance</span>
-    </div>
-    <div class="clock" id="clock" aria-label="current time">--:--</div>
-  </header>
-
-  <main class="content" id="content">
-    <section aria-labelledby="h-attention">
-      <h2 id="h-attention">Needs attention</h2>
-      <div class="cards" id="attention"></div>
-    </section>
-    <section aria-labelledby="h-proposals">
-      <h2 id="h-proposals">Proposals</h2>
-      <div class="cards" id="proposals"></div>
-    </section>
-    <section aria-labelledby="h-next">
-      <h2 id="h-next">Next up</h2>
-      <div class="cards" id="nextup"></div>
-    </section>
-    <section aria-labelledby="h-quests">
-      <h2 id="h-quests">Today&rsquo;s quests</h2>
-      <div class="cards" id="quests"></div>
-    </section>
-  </main>
-
-  <footer class="hint" id="foot">loading&hellip;</footer>
-
-  <div class="overlay" id="detail" hidden>
-    <div class="detail-card" role="dialog" aria-modal="true" aria-labelledby="d-title">
-      <span class="area" id="d-area"></span>
-      <span class="title" id="d-title"></span>
-      <span class="detail" id="d-detail"></span>
-      <div id="d-proposal"></div>
-      <div class="detail-actions">
-        <button class="btn primary" id="d-approve" type="button">Approve</button>
-        <button class="btn" id="d-dismiss" type="button">Dismiss</button>
-        <button class="btn" id="d-back" type="button">&larr; Back</button>
-      </div>
-      <div class="detail-note" id="d-note" hidden></div>
-    </div>
+<div class="app">
+  <div class="topbar">
+    <span class="brand">MIA</span>
+    <span class="clock" id="clock">--:--</span>
   </div>
+  <div class="status">LEVEL 7 · 1,240 XP · 12-DAY STREAK</div>
+  <div class="xpbar"><div class="xpfill"></div></div>
+  <div class="summary" id="summary"></div>
+  <div class="pagehead">
+    <button class="nav" id="navPrev" type="button" aria-label="Previous section">&#8249;</button>
+    <div class="pagetitle" id="pagetitle"></div>
+    <button class="nav" id="navNext" type="button" aria-label="Next section">&#8250;</button>
+  </div>
+  <div class="dots" id="dots"></div>
+  <div class="page" id="page"></div>
+  <div class="hint" id="hint">&#8592;&#8594; section · &#8593;&#8595; cards · Enter opens · R refreshes</div>
 </div>
 
 <script>
@@ -204,43 +123,66 @@
 const MOCK = {
   meta: { source: "embedded-fallback" },
   attention: [
-    { id: "gh-ph", area: "Greenhouse", title: "pH drift high",
-      detail: "Aquaponics cell at 7.6 — target 6.8–7.2.", severity: "warning",
+    { id: "alert-7", area: "Greenhouse", severity: "critical", title: "pH drift high",
+      detail: "Cell 2 (Lettuce Raft) at 7.8 — target 6.8–7.2. Source: cell-2 · 3 occurrences.",
       action: "Open on phone", proposal: null },
-    { id: "gh-feeder", area: "Greenhouse", title: "Fish feeder 2 days overdue",
+    { id: "alert-9", area: "Greenhouse", severity: "warning", title: "Fish feeder 2 days overdue",
       detail: "Feeder A missed its refill window. Fish were fed manually.",
-      severity: "critical", action: "Confirm refill" }
+      action: "Open on phone", proposal: null }
   ],
   proposals: [
-    { id: "exp-7", area: "Proposals", title: "Test EC target maximum: 1.8 → 2.0",
-      detail: "Raising EC max improves lettuce yield.", severity: "warning",
-      action: "Review",
-      proposal: {
-        demo: true,
+    { id: "exp-7", area: "Proposals", severity: "warning",
+      title: "Test EC target maximum: 1.8 → 2.0",
+      detail: "Raising EC max improves lettuce yield.", action: "Review",
+      proposal: { real: true, kind: "experiment", row_id: 7,
         title: "Test EC target maximum: 1.8 → 2.0",
         summary: "Raising EC max improves lettuce yield.",
-        evidence: ["Lettuce Raft: baseline 1.8, test 2.0", "Runs until 2026-10-15",
-                   "Proposed by assistant"],
-        safety: "Approval changes the target the control loop aims for. Every dose still passes the Safety MCU's hard limits — approval changes the target, never bypasses safety.",
+        evidence: ["Raising EC max improves lettuce yield.",
+                   "Lettuce Raft: baseline 1.8, test 2.0",
+                   "Runs until 2026-10-15", "Proposed by assistant"],
+        safety: "Approval changes the target the control loop aims for. Every dose still passes the Safety MCU's hard limits (max pulse, min interval, 24h cap) — approval changes the target, never bypasses safety.",
         approve_label: "Start experiment", dismiss_label: "Dismiss" } }
   ],
+  tracked: [
+    { id: "trk-cell2", area: "Greenhouse · Cell 2", severity: "info",
+      title: "pH 6.9 · EC 1.9 · 24.1°C",
+      detail: "All in band. Stable 6 hours — twin agrees with sensors.",
+      action: "Open twin", proposal: null }
+  ],
   next_up: [
-    { id: "gr-mower", area: "Garage", title: "Sharpen mower blades",
-      detail: "Overdue 12 days. Next mow window: Saturday.", severity: "info", action: "Schedule" },
-    { id: "gr-washer", area: "Garage", title: "Winterize pressure washer",
-      detail: "First freeze risk in about 3 weeks.", severity: "info", action: "Add to weekend" }
+    { id: "maint-4", area: "Greenhouse", severity: "warning", title: "Sharpen mower blades",
+      detail: "Overdue 12 days. Next mow window: Saturday.", action: "Open on phone", proposal: null },
+    { id: "maint-5", area: "Garage", severity: "info", title: "Winterize pressure washer",
+      detail: "First freeze risk in about 3 weeks.", action: "Open on phone", proposal: null }
   ],
   quests: [
-    { id: "q-checkin", area: "Greenhouse", title: "Morning greenhouse check-in",
+    { id: "a1b2c3d4e5", area: "Field Season · Greenhouse", title: "Morning greenhouse check-in",
       detail: "Walk the cell, glance at the twin.", xp: 25 },
-    { id: "q-phcal", area: "Greenhouse", title: "Calibrate pH pen",
+    { id: "k1l2m3n4o5", area: "Garage", title: "Calibrate pH pen",
       detail: "Due every 30 days — last done 34 days ago.", xp: 40 }
   ]
 };
 
-const doneKey = id => "glance-done-" + id;
-const isDone = id => { try { return localStorage.getItem(doneKey(id)) === "1"; } catch (e) { return false; } };
-const setDone = (id, v) => { try { localStorage.setItem(doneKey(id), v ? "1" : "0"); } catch (e) {} };
+const PAGES = [
+  { key: "attention", label: "Needs attention", empty: "All clear. Nothing needs you." },
+  { key: "proposals", label: "Proposals", empty: "No proposals awaiting review." },
+  { key: "tracked", label: "Tracked", empty: "Nothing tracked yet." },
+  { key: "next_up", label: "Next up", empty: "All clear." },
+  { key: "quests", label: "Today's quests", empty: "No quests yet — enjoy the day." }
+];
+
+let STATE = MOCK;
+let page = 0;
+let openId = null;
+
+/* Persistence (decisions + quest check-ins), guarded: storage can fail or
+   be cleared on the device. */
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem("glance-" + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("glance-" + k, JSON.stringify(v)); } catch (e) {} }
+};
+let decisions = LS.get("decisions", {});
+let doneQuests = LS.get("done", {});
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -249,66 +191,160 @@ function el(tag, cls, text) {
   return n;
 }
 
-function cardButton(item, kind) {
+function summaryText() {
+  const a = (STATE.attention || []).length;
+  const p = (STATE.proposals || []).filter(x => !decisions[x.id]).length;
+  const q = (STATE.quests || []).filter(x => !doneQuests[x.id]).length;
+  const bits = [a ? a + (a === 1 ? " thing needs" : " things need") + " you" : "nothing needs you"];
+  if (p) bits.push(p + (p === 1 ? " proposal waiting" : " proposals waiting"));
+  if (q) bits.push(q + (q === 1 ? " quest open" : " quests open"));
+  bits.push("all else quiet");
+  return bits.join(" · ") + ".";
+}
+
+function expandPanel(item) {
+  const p = el("div", "expand sev-" + (item.severity || "info"));
+  const prop = item.proposal;
+  if (prop) {
+    p.append(el("span", "tag", prop.real ? "HOMESTEAD QUEUE" : "PREVIEW"));
+    if (prop.summary) p.append(el("div", "dsum", prop.summary));
+    if (prop.evidence && prop.evidence.length) {
+      const ul = el("ul", "ev");
+      for (const e of prop.evidence) ul.append(el("li", null, e));
+      p.append(ul);
+    }
+    if (prop.safety) p.append(el("div", "safety", prop.safety));
+  } else if (item.detail) {
+    p.append(el("div", "dsum", item.detail));
+  }
+  const btns = el("div", "btns");
+  if (prop) {
+    const ap = el("button", "btn primary", prop.approve_label || "Approve");
+    ap.type = "button";
+    ap.addEventListener("click", () => decide(item.id, "approved"));
+    const dm = el("button", "btn", prop.dismiss_label || "Dismiss");
+    dm.type = "button";
+    dm.addEventListener("click", () => decide(item.id, "dismissed"));
+    btns.append(ap); btns.append(dm);
+  }
+  const bk = el("button", "btn", "← Collapse");
+  bk.type = "button";
+  bk.addEventListener("click", closeDetail);
+  btns.append(bk);
+  p.append(btns);
+  const dec = decisions[item.id];
+  if (dec === "approved")
+    p.append(el("div", "note", "Approved — saved on this device. Sending the decision to the homestead queue is coming next."));
+  else if (dec === "dismissed")
+    p.append(el("div", "note", "Dismissed."));
+  if (!prop)
+    p.append(el("div", "full", "Full detail lives on the phone / desktop — the glasses stay glanceable."));
+  return p;
+}
+
+function cardBtn(item, isQuest) {
   const b = el("button", "card sev-" + (item.severity || "info"));
   b.type = "button";
   b.append(el("span", "area", item.area || ""));
-  b.append(el("span", "title", item.title || ""));
-  if (item.detail) b.append(el("span", "detail", item.detail));
+  b.append(el("span", "ctitle", item.title || ""));
+  if (item.detail) b.append(el("span", "cdetail", item.detail));
   const row = el("span", "row");
-  if (kind === "quest") {
-    const left = el("span", "row");
-    const check = el("span", "check", isDone(item.id) ? "✓" : "");
-    check.setAttribute("aria-hidden", "true");
-    left.append(check);
-    left.append(el("span", "action", isDone(item.id) ? "Done" : "Check in"));
+  if (isQuest) {
+    const left = el("span");
+    left.append(el("span", "check" + (doneQuests[item.id] ? " done" : "")));
+    left.append(el("span", "action", doneQuests[item.id] ? "Done" : "Check in"));
     row.append(left);
     row.append(el("span", "xp", "+" + (item.xp || 10) + " XP"));
-    if (isDone(item.id)) b.classList.add("done");
-    b.setAttribute("aria-pressed", isDone(item.id) ? "true" : "false");
+    if (doneQuests[item.id]) b.classList.add("decided");
+    b.setAttribute("aria-pressed", doneQuests[item.id] ? "true" : "false");
     b.addEventListener("click", () => {
-      const v = !isDone(item.id);
-      setDone(item.id, v);
-      b.classList.toggle("done", v);
-      b.setAttribute("aria-pressed", v ? "true" : "false");
-      check.textContent = v ? "✓" : "";
-      left.querySelector(".action").textContent = v ? "Done" : "Check in";
+      doneQuests[item.id] = !doneQuests[item.id];
+      LS.set("done", doneQuests);
+      render(false);
     });
   } else {
-    row.append(el("span", "action", (item.action || "Open") + " →"));
-    b.dataset.itemId = item.id;
-    b.addEventListener("click", () => openDetail(item));
-    paintCardDecision(b, item);
+    let act = item.action || "Open";
+    const dec = decisions[item.id];
+    if (dec === "approved") act = "Approved";
+    else if (dec === "dismissed") act = "Dismissed";
+    if (openId === item.id) act = "Close";
+    row.append(el("span", "action", act + " →"));
+    if (dec) b.classList.add("decided");
+    b.addEventListener("click", () => toggleDetail(item.id));
   }
   b.append(row);
   return b;
 }
 
-function render(state) {
-  const map = [["attention", "attention"], ["proposals", "proposals"],
-               ["next_up", "nextup"], ["quests", "quests"]];
-  const emptyText = { quests: "No quests yet — enjoy the day.",
-                      proposals: "No proposals awaiting review." };
-  for (const [key, mountId] of map) {
-    const mount = document.getElementById(mountId);
-    mount.replaceChildren();
-    const items = state[key] || [];
-    if (!items.length) {
-      mount.append(el("div", "allclear", emptyText[key] || "All clear."));
-      continue;
-    }
-    for (const item of items) mount.append(cardButton(item, key === "quests" ? "quest" : "card"));
+function render(refocus) {
+  document.getElementById("summary").textContent = summaryText();
+  document.getElementById("pagetitle").textContent = PAGES[page].label;
+  const dots = document.getElementById("dots");
+  dots.replaceChildren();
+  PAGES.forEach((p, i) => dots.append(el("span", "dot" + (i === page ? " on" : ""))));
+  const box = document.getElementById("page");
+  box.replaceChildren();
+  const pg = PAGES[page];
+  const items = STATE[pg.key] || [];
+  if (!items.length) { box.append(el("div", "empty", pg.empty)); }
+  const isQuest = pg.key === "quests";
+  for (const item of items) {
+    box.append(cardBtn(item, isQuest));
+    if (!isQuest && openId === item.id) box.append(expandPanel(item));
   }
-  const src = (state.meta && state.meta.source) || "live";
-  const gen = (state.meta && state.meta.generated_at)
-    ? " · data " + String(state.meta.generated_at).slice(11, 16) : "";
-  document.getElementById("foot").innerHTML =
-    (src === "live" ? "" : '<span class="live-dot">●</span> preview data &nbsp;·&nbsp; ') +
-    "↑↓ navigate · Enter opens detail · R refreshes" + gen;
-  // Focus the first card so directional navigation starts immediately.
-  const first = document.querySelector(".card");
-  if (first && !document.querySelector(".card:focus")) first.focus({ preventScroll: true });
+  if (refocus) {
+    const first = box.querySelector(".card, .btn");
+    if (first) first.focus({ preventScroll: true });
+  }
 }
+
+function gotoPage(i) {
+  page = (i + PAGES.length) % PAGES.length;
+  openId = null;
+  render(true);
+}
+
+/* Detail expansion rides browser history so the shell's Back collapses it. */
+function toggleDetail(id) {
+  if (openId === id) { closeDetail(); return; }
+  openId = id;
+  try { history.pushState({ glanceDetail: id }, ""); } catch (e) {}
+  render(true);
+}
+function closeDetail() {
+  if (openId == null) return;
+  openId = null;
+  render(true);
+}
+function decide(id, v) {
+  decisions[id] = v;
+  LS.set("decisions", decisions);
+  render(true);
+}
+
+document.getElementById("navPrev").addEventListener("click", () => gotoPage(page - 1));
+document.getElementById("navNext").addEventListener("click", () => gotoPage(page + 1));
+
+window.addEventListener("popstate", () => { if (openId != null) closeDetail(); });
+
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") { e.preventDefault(); gotoPage(page + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); gotoPage(page - 1); }
+  else if (e.key === "Escape") { e.preventDefault(); closeDetail(); }
+  else if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey && !e.altKey) refresh();
+});
+
+/* Up/Down stays within the page: the browser's spatial navigation handles
+   ordinary movement; we keep focus inside .page so it never gets lost. */
+document.getElementById("page").addEventListener("keydown", e => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const f = [...document.querySelectorAll("#page .card, #page .btn")];
+  const i = f.indexOf(document.activeElement);
+  if (i === -1) return;
+  e.preventDefault();
+  const n = e.key === "ArrowDown" ? f[i + 1] : f[i - 1];
+  if (n) { n.focus(); n.scrollIntoView({ block: "nearest" }); }
+});
 
 async function loadState() {
   try {
@@ -320,138 +356,22 @@ async function loadState() {
   } catch (e) { return MOCK; }
 }
 
-/* Refresh state without losing your place; quest check-ins live in
-   localStorage so they survive re-renders. */
 async function refresh() {
-  if (!document.getElementById("detail").hidden) return; // don't disturb an open detail view
-  const cards = [...document.querySelectorAll(".card")];
-  const idx = Math.max(0, cards.indexOf(document.activeElement));
-  render(await loadState());
-  const fresh = [...document.querySelectorAll(".card")];
-  (fresh[idx] || fresh[0])?.focus({ preventScroll: true });
+  if (openId != null) return; // don't disturb an open detail
+  STATE = await loadState();
+  render(false);
 }
-
-/* ---- Proposal detail: read / propose / approve ----
-   Decisions persist in localStorage. The write-back to the homestead
-   approval queue isn't built yet, so approvals are captured on-device
-   for now — nothing actuates from the glasses. */
-const decisionKey = id => "glance-decision-" + id;
-const getDecision = id => { try { return localStorage.getItem(decisionKey(id)); } catch (e) { return null; } };
-const setDecision = (id, v) => { try { localStorage.setItem(decisionKey(id), v); } catch (e) {} };
-
-let detailItem = null;
-let detailReturnTo = null;
-
-function paintCardDecision(b, item) {
-  const dec = getDecision(item.id);
-  const action = b.querySelector(".action");
-  b.classList.toggle("decided", !!dec);
-  if (action) {
-    if (dec === "approved") action.textContent = "✓ Approved";
-    else if (dec === "dismissed") action.textContent = "Dismissed";
-  }
-}
-
-function openDetail(item) {
-  detailItem = item;
-  detailReturnTo = document.activeElement;
-  const ov = document.getElementById("detail");
-  const card = ov.querySelector(".detail-card");
-  card.classList.remove("sev-critical", "sev-warning", "sev-info");
-  card.classList.add("sev-" + (item.severity || "info"));
-  document.getElementById("d-area").textContent = item.area || "";
-  document.getElementById("d-title").textContent = item.title || "";
-  const det = document.getElementById("d-detail");
-  det.textContent = item.detail || "";
-  det.style.display = item.detail ? "" : "none";
-
-  const pm = document.getElementById("d-proposal");
-  pm.replaceChildren();
-  const prop = item.proposal;
-  const approveBtn = document.getElementById("d-approve");
-  const dismissBtn = document.getElementById("d-dismiss");
-  if (prop) {
-    if (prop.demo) pm.append(el("span", "preview-tag", "PREVIEW"));
-    else if (prop.real) pm.append(el("span", "preview-tag", "HOMESTEAD QUEUE"));
-    pm.append(el("div", "title", prop.title || "Proposal"));
-    if (prop.summary) pm.append(el("div", "detail", prop.summary));
-    if (prop.evidence && prop.evidence.length) {
-      const ul = el("ul", "ev");
-      for (const e of prop.evidence) ul.append(el("li", null, e));
-      pm.append(ul);
-    }
-    if (prop.safety) pm.append(el("div", "safety", prop.safety));
-    approveBtn.hidden = false;
-    dismissBtn.hidden = false;
-    approveBtn.textContent = prop.approve_label || "Approve";
-    dismissBtn.textContent = prop.dismiss_label || "Dismiss";
-  } else {
-    approveBtn.hidden = true;
-    dismissBtn.hidden = true;
-  }
-  paintDecision();
-  ov.hidden = false;
-  (prop ? approveBtn : document.getElementById("d-back")).focus();
-}
-
-function paintDecision() {
-  const note = document.getElementById("d-note");
-  const dec = detailItem && getDecision(detailItem.id);
-  if (dec === "approved") { note.hidden = false; note.textContent = "✓ Approved — saved on this device. Sending the decision to the homestead queue is coming next."; }
-  else if (dec === "dismissed") { note.hidden = false; note.textContent = "Dismissed."; }
-  else note.hidden = true;
-}
-
-function decide(v) {
-  if (!detailItem) return;
-  setDecision(detailItem.id, v);
-  paintDecision();
-  const b = document.querySelector('.card[data-item-id="' + CSS.escape(detailItem.id) + '"]');
-  if (b) paintCardDecision(b, detailItem);
-}
-
-function closeDetail() {
-  document.getElementById("detail").hidden = true;
-  detailItem = null;
-  if (detailReturnTo && document.contains(detailReturnTo)) detailReturnTo.focus({ preventScroll: true });
-  detailReturnTo = null;
-}
-
-document.getElementById("d-back").addEventListener("click", closeDetail);
-document.getElementById("d-approve").addEventListener("click", () => decide("approved"));
-document.getElementById("d-dismiss").addEventListener("click", () => decide("dismissed"));
-document.getElementById("detail").addEventListener("keydown", e => {
-  const btns = [...document.querySelectorAll("#detail .btn")].filter(b => !b.hidden);
-  const i = btns.indexOf(document.activeElement);
-  if (e.key === "Escape") { e.preventDefault(); closeDetail(); }
-  else if (e.key === "ArrowDown") { e.preventDefault(); (btns[i + 1] || btns[0])?.focus(); }
-  else if (e.key === "ArrowUp") { e.preventDefault(); (btns[i - 1] || btns[btns.length - 1])?.focus(); }
-});
-
-/* Directional navigation: ↑/↓ move between cards, Home/End jump. */
-document.getElementById("content").addEventListener("keydown", e => {
-  const cards = [...document.querySelectorAll(".card")];
-  const i = cards.indexOf(document.activeElement);
-  if (e.key === "ArrowDown") { e.preventDefault(); (cards[i + 1] || cards[0])?.focus(); }
-  else if (e.key === "ArrowUp") { e.preventDefault(); (cards[i - 1] || cards[cards.length - 1])?.focus(); }
-  else if (e.key === "Home") { e.preventDefault(); cards[0]?.focus(); }
-  else if (e.key === "End") { e.preventDefault(); cards[cards.length - 1]?.focus(); }
-});
 
 function tick() {
   const d = new Date();
-  let h = d.getHours() % 12 || 12;
-  document.getElementById("clock").textContent = h + ":" + String(d.getMinutes()).padStart(2, "0");
+  const h = d.getHours() % 12 || 12;
+  document.getElementById("clock").textContent =
+    h + ":" + String(d.getMinutes()).padStart(2, "0") + (d.getHours() >= 12 ? " PM" : " AM");
 }
 tick(); setInterval(tick, 20000);
 
-loadState().then(render);
-
-/* Auto-refresh every minute + manual refresh with R. */
+loadState().then(s => { STATE = s; render(true); });
 setInterval(refresh, 60000);
-document.addEventListener("keydown", e => {
-  if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey && !e.altKey) refresh();
-});
 </script>
 </body>
 </html>
