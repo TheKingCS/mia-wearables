@@ -292,6 +292,9 @@ def _money(x):
         return "$?"
 
 
+LAST_BILLS_LINE = {"text": None}
+
+
 def map_budget_cards(data_dir, today, attention, next_up, tracked):
     p = Path(data_dir)
     bills = load_list(p / "bills.json")
@@ -300,12 +303,15 @@ def map_budget_cards(data_dir, today, attention, next_up, tracked):
     targets = load_list(p / "budget_targets.json")
     debts = load_list(p / "debts.json")
 
+    upcoming = []
     for b in bills:
         due = parse_date(b.get("due_date"))
         name = b.get("name", "Bill")
         if due is None:
             continue
         days = (due - today).days
+        if 0 <= days <= 14:
+            upcoming.append((days, name, due, b.get("amount")))
         if days < 0:
             attention.append({
                 "id": f"bill-{b.get('bill_id')}",
@@ -349,6 +355,17 @@ def map_budget_cards(data_dir, today, attention, next_up, tracked):
                 "action": "Open on phone",
                 "proposal": None,
             })
+    if upcoming:
+        upcoming.sort()
+        d0, n0, due0, amt0 = upcoming[0]
+        when = "today" if d0 == 0 else ("tomorrow" if d0 == 1
+                                        else f"in {d0} day{'s' if d0 != 1 else ''}")
+        LAST_BILLS_LINE["text"] = (
+            f"Next bill: {n0} {_money(amt0)} due {when} ({due0.isoformat()})."
+            + (f" {len(upcoming) - 1} more in the next two weeks."
+               if len(upcoming) > 1 else ""))
+    else:
+        LAST_BILLS_LINE["text"] = "No bills due in the next two weeks."
     if spent_by_cat and tgt:
         worst = max((c for c in spent_by_cat if c in tgt and tgt[c] > 0),
                     key=lambda c: spent_by_cat[c] / tgt[c], default=None)
@@ -632,6 +649,7 @@ def build_brief(attention, proposals, tracked, quests):
     b_greenhouse = gh.get("title") if gh else "No live greenhouse data right now."
     fin = _area_card(attention, "Budget") or _area_card(tracked, "Budget")
     b_finance = fin.get("title") if fin else "No budget data right now."
+    b_bills = LAST_BILLS_LINE["text"] or "No bill data right now."
     wrk = _area_card(tracked, "Workout")
     b_workout = wrk.get("title") if wrk else "No workout data right now."
     kit = _area_card(tracked, "Kitchen")
@@ -642,6 +660,7 @@ def build_brief(attention, proposals, tracked, quests):
         "proposals": b_proposals,
         "quests": b_quests,
         "finance": b_finance,
+        "bills": b_bills,
         "workout": b_workout,
         "kitchen": b_kitchen,
     }
