@@ -43,6 +43,7 @@ app picks up the new state.json on next load.
 """
 
 import argparse
+import re
 import datetime as dt
 import json
 from pathlib import Path
@@ -513,6 +514,140 @@ def map_kitchen_cards(data_dir, today, attention, next_up, tracked):
         })
 
 
+def _is_garage_category(cat):
+    """Garage = vehicles & tools. Property keeps Appliance/Property; the
+    property card mapper still owns due-task cards for tools, so a tool
+    with an overdue task may surface in both places — browse vs alert."""
+    c = (cat or "").lower()
+    return any(k in c for k in ("vehicle", "tool", "equipment", "mower",
+                               "automotive", "machine"))
+
+
+def map_garage_index(data_dir):
+    """Garage browse index: the real asset records + their tasks.
+
+    Same MaintenanceAsset source as the glance cards — this is the
+    asset's full record, not a summary.
+    """
+    p = Path(data_dir)
+    raw = load_json(str(p / "maintenance.json"))
+    if isinstance(raw, dict):
+        assets, tasks = raw.get("assets", []), raw.get("tasks", [])
+    elif isinstance(raw, list):
+        assets, tasks = raw, []
+    else:
+        assets, tasks = [], []
+    if not tasks and (p / "maintenance_tasks.json").is_file():
+        tasks = [x for x in load_list(p / "maintenance_tasks.json")
+                 if isinstance(x, dict)]
+    items = []
+    for a in assets:
+        if not isinstance(a, dict):
+            continue
+        cat = (a.get("category") or "").strip()
+        if not _is_garage_category(cat):
+            continue
+        rows = []
+        for key, label in [("category", "Category"),
+                           ("manufacturer", "Make"),
+                           ("model", "Model"),
+                           ("serial", "Serial"),
+                           ("purchase_date", "Purchased"),
+                           ("warranty_until", "Warranty until"),
+                           ("location", "Location"),
+                           ("current_hours", "Hours")]:
+            v = a.get(key)
+            if v is not None and str(v).strip():
+                rows.append([label, str(v)])
+        t_rows = []
+        for x in tasks:
+            if not isinstance(x, dict) or x.get("asset_id") != a.get("asset_id"):
+                continue
+            label = x.get("title", "Task")
+            hrs, cur = x.get("interval_hours"), x.get("current_hours")
+            if hrs is not None and cur is not None:
+                left = hrs - cur
+                label += (" — due now" if left <= 0
+                          else f" — in {left} hrs")
+            elif x.get("interval_days"):
+                label += f" — every {x['interval_days']} days"
+            t_rows.append(label)
+        sub_bits = [cat] if cat else []
+        if a.get("current_hours") is not None:
+            sub_bits.append(f"{a['current_hours']} hrs")
+        items.append({
+            "id": f"asset-{a.get('asset_id')}",
+            "title": a.get("name", "Unnamed"),
+            "sub": " · ".join(sub_bits),
+            "fields": rows,
+            "list": ({"title": "Maintenance", "items": t_rows}
+                     if t_rows else None),
+            "note": "Same engine as the glance cards — completing a task "
+                    "checks it off everywhere.",
+        })
+    return {"label": "Garage", "eyebrow": "Vehicles & tools", "items": items}
+
+
+def map_kitchen_index(data_dir):
+    """Kitchen browse index: recipe cards from KitchenManager fields."""
+    p = Path(data_dir)
+    items = []
+    for r in load_list(p / "kitchen_recipes.json"):
+        if not isinstance(r, dict):
+            continue
+        ings = []
+        for i in (r.get("ingredients") or [])[:10]:
+            if isinstance(i, dict):
+                qty = str(i.get("quantity", "")).strip()
+                unit = str(i.get("unit", "")).strip()
+                ings.append(f"{qty} {unit} {i.get('name', '')}".strip())
+            else:
+                ings.append(str(i))
+        rows = []
+        for key, label in [("servings", "Servings"),
+                           ("prep_time_minutes", "Prep"),
+                           ("prep_time", "Prep"),
+                           ("cook_time_minutes", "Cook"),
+                           ("cook_time", "Cook"),
+                           ("calories", "Calories"),
+                           ("protein_g", "Protein"), ("protein", "Protein"),
+                           ("carbs_g", "Carbs"), ("fat_g", "Fat")]:
+            v = r.get(key)
+            if v is not None and str(v).strip():
+                rows.append([label, str(v)])
+        sub_bits = []
+        ct = r.get("cook_time_minutes") or r.get("cook_time")
+        if ct:
+            sub_bits.append(f"{ct} min")
+        if r.get("calories"):
+            sub_bits.append(f"{r['calories']} cal")
+        steps = r.get("steps") or r.get("instructions") or []
+        rid = r.get("recipe_id") or r.get("id") or r.get("name")
+        items.append({
+            "id": f"recipe-{rid}",
+            "title": r.get("name", "Untitled recipe"),
+            "sub": " · ".join(sub_bits),
+            "fields": rows,
+            "list": ({"title": "Ingredients", "items": ings}
+                     if ings else None),
+            "note": (f"{len(steps)} steps — cooking mode reads them to you."
+                     if steps else "Recipe stored in KitchenManager."),
+        })
+    pantry = load_list(p / "kitchen_pantry.json")
+    if pantry:
+        items.append({
+            "id": "pantry",
+            "title": "Pantry",
+            "sub": f"{len(pantry)} items tracked",
+            "fields": [["Items", str(len(pantry))]],
+            "list": {"title": "Sample",
+                     "items": [str(x.get("name")) for x in pantry[:6]
+                               if isinstance(x, dict)]},
+            "note": "The glance's 'Use up soon' card opens into this.",
+        })
+    return {"label": "Kitchen", "eyebrow": "Recipes & pantry", "items": items}
+
+
 def map_workout_cards(data_dir, today, tracked):
     p = Path(data_dir)
     sessions = load_list(p / "workout_sessions.json")
@@ -670,31 +805,128 @@ SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
 
 
 def build_answer(attention, proposals, quests):
-    """The answer-first home object: what matters most, right now.
+    """Context Engine v1 — "what does this moment deserve?"
 
-    Derived from the mapped cards (same source as the glance), so every
-    surface states the same priority. Empty attention = the quiet state.
+    Scores every candidate (attention cards, waiting proposals, today's
+    quests) with explainable weights, then composes the answer from the
+    top-ranked item. Weights live in CONTEXT_WEIGHTS so they can be tuned
+    against real data; each candidate keeps its basis in `reason`.
     """
-    ranked = sorted(attention,
-                    key=lambda c: SEV_RANK.get(c.get("severity", "info"), 2))
-    if ranked:
-        n = len(ranked)
-        headline = f"{n} thing{'s' if n != 1 else ''} need{'s' if n == 1 else ''} you."
-        top = ranked[0]
-        focus = {"id": top.get("id"), "title": top.get("title"),
-                 "area": top.get("area")}
-    else:
-        headline = "Everything is quiet."
-        focus = None
+    ranked = _score_candidates(attention, proposals, quests)
+    n_att = len(attention)
     parts = []
     if proposals:
-        n = len(proposals)
-        parts.append(f"{n} proposal{'s' if n != 1 else ''} waiting")
+        parts.append(f"{len(proposals)} proposal{'s' if len(proposals) != 1 else ''} waiting")
     if quests:
-        n = len(quests)
-        parts.append(f"{n} quest{'s' if n != 1 else ''} open")
-    sub = (" · ".join(parts) + ".") if parts else "No proposals or quests waiting."
-    return {"headline": headline, "focus": focus, "sub": sub}
+        parts.append(f"{len(quests)} quest{'s' if len(quests) != 1 else ''} open")
+    if not ranked:
+        return {"headline": "Everything is quiet.",
+                "focus": None,
+                "sub": (" · ".join(parts) + ".") if parts else "No proposals or quests waiting.",
+                "reason": ["nothing scored — quiet state"]}
+    score, kind, basis, obj = ranked[0]
+    focus = {"id": obj.get("id"), "title": obj.get("title"),
+             "area": obj.get("area"), "score": score,
+             "why": ", ".join(basis)}
+    if score >= CONTEXT_WEIGHTS["urgent_line"]:
+        if n_att > 1:
+            headline = f"{n_att} things need you — {obj.get('title')} first."
+        else:
+            headline = f"{obj.get('title')} needs you."
+    elif n_att > 1:
+        headline = f"{n_att} things deserve you — {obj.get('title')} first."
+    elif kind == "quest":
+        headline = f"Today's focus: {obj.get('title')}."
+    else:
+        headline = obj.get("title", "Something deserves you.")
+    sub_bits = []
+    if len(ranked) > 1:
+        second = ranked[1][3]
+        sub_bits.append(f"Also: {second.get('title')}.")
+    sub_bits.extend(parts)
+    sub = " ".join(sub_bits) if sub_bits else "Nothing else waiting."
+    reason = [f"{o.get('title')} — {s} ({', '.join(b)})"
+              for (s, _k, b, o) in ranked[:3]]
+    return {"headline": headline, "focus": focus, "sub": sub, "reason": reason}
+
+
+CONTEXT_WEIGHTS = {
+    "critical": 160, "warning": 100, "info": 40,
+    "overdue_per_day": 5,
+    "money_bonus": 25,      # Budget-area items: money is actually at stake
+    "living_bonus": 40,     # Greenhouse: living systems suffer in silence
+    "quest_today": 60,
+    "streak_risk": 50,      # streak >= 3 not yet done today
+    "proposal_waiting": 70,  # Gate A/B approvals are decisions, not tasks
+    "urgent_line": 90,       # >= this reads as "needs you", below as "deserves you"
+}
+
+_OVERDUE_DAYS_RE = re.compile(r"overdue (\d+) day", re.IGNORECASE)
+_DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
+
+def _extract_overdue_days(text):
+    """Pull an overdue-day count from card text (due_line formats)."""
+    m = _OVERDUE_DAYS_RE.search(text or "")
+    if m:
+        return int(m.group(1))
+    days = 0
+    today = dt.date.today()
+    for m in _DATE_RE.finditer(text or ""):
+        try:
+            d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            continue
+        delta = (today - d).days
+        if 0 < delta and delta > days:
+            days = delta
+    return days
+
+
+def _score_candidates(attention, proposals, quests):
+    """Score -> [(score, kind, basis, card)] sorted best-first."""
+    ranked = []
+    for c in attention:
+        sev = c.get("severity", "info")
+        score = CONTEXT_WEIGHTS.get(sev, 40)
+        basis = [sev]
+        text = f"{c.get('title', '')} {c.get('detail', '')}"
+        days = _extract_overdue_days(text)
+        if days:
+            score += days * CONTEXT_WEIGHTS["overdue_per_day"]
+            basis.append(f"{days}d overdue")
+        if c.get("area") == "Budget":
+            score += CONTEXT_WEIGHTS["money_bonus"]
+            basis.append("money at stake")
+        if c.get("area") == "Greenhouse" and "overdue" in text.lower():
+            score += CONTEXT_WEIGHTS["living_bonus"]
+            basis.append("living system")
+        ranked.append((score, "attention", basis, c))
+    if proposals:
+        score = CONTEXT_WEIGHTS["proposal_waiting"]
+        first = proposals[0]
+        ranked.append((score, "proposal",
+                       [f"{len(proposals)} waiting"],
+                       {"id": "proposals", "title": f"{len(proposals)} proposal"
+                        f"{'s' if len(proposals) != 1 else ''} waiting",
+                        "area": "Proposals",
+                        "detail": first.get("title", "")}))
+    for q in quests:
+        score = CONTEXT_WEIGHTS["quest_today"]
+        basis = ["quest due today"]
+        streak = q.get("streak", 0) or 0
+        if not streak:
+            m = re.search(r"streak[:\s]*(\d+)", str(q.get("detail", "")),
+                          re.IGNORECASE)
+            streak = int(m.group(1)) if m else 0
+        if streak >= 3:
+            score += CONTEXT_WEIGHTS["streak_risk"]
+            basis.append(f"{streak}-day streak at risk")
+        ranked.append((score, "quest", basis,
+                       {"id": q.get("id"), "title": q.get("title"),
+                        "area": q.get("area"), "detail": q.get("detail", "")}))
+    return sorted(ranked, key=lambda x: -x[0])
+
 
 def load_missions_quests(missions_path, profile_id=None):
     """Extract today's active quests from MIA's data/missions.json.
@@ -725,6 +957,7 @@ def load_missions_quests(missions_path, profile_id=None):
             "title": m.get("name", "Unnamed mission"),
             "detail": m.get("summary", ""),
             "xp": m.get("reward_xp", 0),
+            "streak": m.get("streak", 0),
         })
     return quests
 
@@ -821,6 +1054,11 @@ def main():
         "next_up": next_up,
         "quests": quests,
     }
+    modules = {}
+    if args.mia_data:
+        modules["garage"] = map_garage_index(args.mia_data)
+        modules["kitchen"] = map_kitchen_index(args.mia_data)
+    state["modules"] = modules
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(state, indent=2))
