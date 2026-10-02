@@ -17,7 +17,10 @@ Builds webapp/state.json for the MIA Glance web app from live sources:
 
 Every export also emits `brief`: one-line natural-language summaries
 (greenhouse / attention / proposals / quests / finance / workout /
-kitchen) for voice surfaces (see docs/voice-spec.md).
+kitchen) for voice surfaces (see docs/voice-spec.md). And `answer`:
+the answer-first home object (headline + focus card + sub-line),
+computed from the same cards so every surface agrees on what
+matters most (design addendum 2026-10-02: Context Engine).
   - optional quests JSON file         ->  quests    (fallback when --missions omitted)
 
 Proposals are the real homestead approval queue, not stand-ins: Gate A
@@ -643,6 +646,37 @@ def build_brief(attention, proposals, tracked, quests):
         "kitchen": b_kitchen,
     }
 
+
+SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
+
+
+def build_answer(attention, proposals, quests):
+    """The answer-first home object: what matters most, right now.
+
+    Derived from the mapped cards (same source as the glance), so every
+    surface states the same priority. Empty attention = the quiet state.
+    """
+    ranked = sorted(attention,
+                    key=lambda c: SEV_RANK.get(c.get("severity", "info"), 2))
+    if ranked:
+        n = len(ranked)
+        headline = f"{n} thing{'s' if n != 1 else ''} need{'s' if n == 1 else ''} you."
+        top = ranked[0]
+        focus = {"id": top.get("id"), "title": top.get("title"),
+                 "area": top.get("area")}
+    else:
+        headline = "Everything is quiet."
+        focus = None
+    parts = []
+    if proposals:
+        n = len(proposals)
+        parts.append(f"{n} proposal{'s' if n != 1 else ''} waiting")
+    if quests:
+        n = len(quests)
+        parts.append(f"{n} quest{'s' if n != 1 else ''} open")
+    sub = (" · ".join(parts) + ".") if parts else "No proposals or quests waiting."
+    return {"headline": headline, "focus": focus, "sub": sub}
+
 def load_missions_quests(missions_path, profile_id=None):
     """Extract today's active quests from MIA's data/missions.json.
 
@@ -751,8 +785,10 @@ def main():
             quests = current["quests"]
 
     brief = build_brief(attention, proposals, tracked, quests)
+    answer = build_answer(attention, proposals, quests)
 
     state = {
+        "answer": answer,
         "brief": brief,
         "meta": {
             "source": "live" if (dash or args.mia_data) else "mock",
