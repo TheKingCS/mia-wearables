@@ -850,6 +850,47 @@ def build_answer(attention, proposals, quests):
     return {"headline": headline, "focus": focus, "sub": sub, "reason": reason}
 
 
+RARITY_TIERS = [(350, "Legendary"), (200, "Epic"), (100, "Rare"),
+                (50, "Uncommon"), (0, "Common")]
+
+
+def rarity_for(xp):
+    """Borderlands-flavored rarity from XP value."""
+    for floor, name in RARITY_TIERS:
+        if (xp or 0) >= floor:
+            return name
+    return "Common"
+
+
+def quest_voice(q):
+    """MVS-style quest narration.
+
+    The calm title stays in sections; the epic name carries the game
+    voice for announcements, quest cards, and voice. Announcements are
+    the exact spoken/banner formats:
+      NEW MISSION -> "New Mission: <epic>!" + reward lines
+      COMPLETE    -> "Mission: <epic> Complete!" + reward lines + total
+    """
+    epic = q.get("epic_name") or q.get("title", "Unnamed quest")
+    xp = q.get("xp", 0) or 0
+    bonus = [b for b in (q.get("bonus_tasks") or []) if isinstance(b, dict)]
+    reward_lines = [f"+{xp} XP"]
+    total = xp
+    for b in bonus:
+        bx = b.get("xp", 0) or 0
+        reward_lines.append(f"+{bx} XP — {b.get('name', 'Bonus')}")
+        total += bx
+    return {
+        "epic_title": epic,
+        "rarity": rarity_for(xp),
+        "new_mission": f"New Mission: {epic}",
+        "complete": f"Mission: {epic} Complete!",
+        "reward_lines": reward_lines,
+        "total_xp": total,
+        "bonus_count": len(bonus),
+    }
+
+
 CONTEXT_WEIGHTS = {
     "critical": 160, "warning": 100, "info": 40,
     "overdue_per_day": 5,
@@ -958,6 +999,8 @@ def load_missions_quests(missions_path, profile_id=None):
             "detail": m.get("summary", ""),
             "xp": m.get("reward_xp", 0),
             "streak": m.get("streak", 0),
+            "epic_name": m.get("epic_name"),
+            "bonus_tasks": m.get("bonus_tasks", []),
         })
     return quests
 
@@ -1027,7 +1070,24 @@ def main():
         quests = load_missions_quests(args.missions, args.profile)
     elif args.quests:
         q = load_json(args.quests)
-        if isinstance(q, list):
+        if isinstance(q, dict) and isinstance(q.get("quests"), list):
+            # Quest deck file: {"deck": ..., "quests": [...]} — normalize
+            # the mission record shape into quest cards.
+            quests = []
+            for m in q["quests"]:
+                if not isinstance(m, dict):
+                    continue
+                quests.append({
+                    "id": m.get("mission_id"),
+                    "area": m.get("region") or "Missions",
+                    "title": m.get("name", "Unnamed mission"),
+                    "detail": m.get("summary", ""),
+                    "xp": m.get("reward_xp", 0),
+                    "streak": m.get("streak", 0),
+                    "epic_name": m.get("epic_name"),
+                    "bonus_tasks": m.get("bonus_tasks", []),
+                })
+        elif isinstance(q, list):
             quests = q
     else:
         # Preserve any quests already in the current state file so
@@ -1036,6 +1096,9 @@ def main():
         if current and isinstance(current.get("quests"), list):
             quests = current["quests"]
 
+    for q in quests:
+        if isinstance(q, dict) and "voice" not in q:
+            q["voice"] = quest_voice(q)
     brief = build_brief(attention, proposals, tracked, quests)
     answer = build_answer(attention, proposals, quests)
 
