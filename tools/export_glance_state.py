@@ -684,6 +684,62 @@ def map_workout_cards(data_dir, today, tracked):
 PROPERTY_CATEGORIES = ("Appliance", "Property", "Tool")
 
 
+def map_garage_cards(data_dir, today, attention, next_up):
+    """Due/overdue maintenance for garage-category assets (vehicles/tools).
+
+    Property cards deliberately skip these categories; the garage owns
+    its own alerts so the mower's oil change surfaces like everything else.
+    """
+    p = Path(data_dir)
+    raw = load_json(str(p / "maintenance.json"))
+    if isinstance(raw, dict):
+        assets, tasks = raw.get("assets", []), raw.get("tasks", [])
+    elif isinstance(raw, list):
+        assets, tasks = raw, []
+    else:
+        return
+    if not tasks and (p / "maintenance_tasks.json").is_file():
+        tasks = [x for x in load_list(p / "maintenance_tasks.json")
+                 if isinstance(x, dict)]
+    by_id = {a.get("asset_id"): a for a in assets if isinstance(a, dict)}
+    for x in tasks:
+        if not isinstance(x, dict):
+            continue
+        a = by_id.get(x.get("asset_id"), {})
+        if not _is_garage_category(a.get("category")):
+            continue
+        last = parse_date(x.get("last_completed"))
+        interval = x.get("interval_days")
+        title = x.get("title", "Maintenance task")
+        aname = a.get("name", "")
+        label = f"{title}: {aname}" if aname else title
+        if interval and last:
+            due = last + dt.timedelta(days=int(interval))
+            days = (due - today).days
+            card = {
+                "id": f"garage-task-{x.get('task_id')}",
+                "area": "Garage",
+                "title": label,
+                "severity": "info",
+                "action": "Open on phone",
+                "proposal": None,
+            }
+            if days < 0:
+                card.update({
+                    "detail": f"Overdue {-days} day{'s' if -days != 1 else ''} "
+                              f"(was due {due.isoformat()}).",
+                    "severity": "warning",
+                })
+                attention.append(card)
+            elif days <= 14:
+                card.update({
+                    "detail": f"Due in {days} day{'s' if days != 1 else ''} "
+                              f"({due.isoformat()}).",
+                    "severity": "warning" if days <= 3 else "info",
+                })
+                next_up.append(card)
+
+
 def map_property_cards(data_dir, today, attention, next_up):
     p = Path(data_dir)
     assets = {a.get("asset_id"): a for a in load_list(p / "maintenance.json")
@@ -891,6 +947,104 @@ def quest_voice(q):
     }
 
 
+def generate_missions(data_dir, today, attention, next_up, tracked, quests):
+    """MIA invents missions herself.
+
+    This is the differentiator Zac asked for: not a self-managed quest
+    log, but missions *proposed by her* from what she notices in the
+    module state. Each suggestion carries its reason ("MIA noticed..."),
+    a calm title for sections, and an epic name for the game voice.
+    Suggestions are proposals — accepting one is always confirm-gated
+    on the surface, never automatic.
+    """
+    if not data_dir:
+        return []
+    suggested = []
+    have = {(q.get("area"), (q.get("title") or "").lower()) for q in quests}
+
+    def propose(mid, region, title, epic, detail, reason, xp):
+        if (region, title.lower()) in have:
+            return  # don't suggest what's already a quest
+        q = {"id": mid, "area": region, "title": title, "detail": detail,
+             "xp": xp, "epic_name": epic}
+        suggested.append({
+            "id": mid, "area": region, "title": title,
+            "detail": detail, "xp": xp,
+            "rarity": rarity_for(xp),
+            "reason": reason,
+            "source": "mia-generated",
+            "voice": quest_voice(q),
+        })
+        have.add((region, title.lower()))
+
+    # 1. Expiring food -> use-it-up quest
+    for c in attention:
+        if c.get("id") == "pantry-expiring":
+            propose("gen-rot-horde", "Kitchen", "Use up the expiring food",
+                    "Defeat the Rot Horde!",
+                    f"Before they turn: {c.get('detail', '')}",
+                    "MIA noticed expiring items: "
+                    f"{c.get('detail', 'check the pantry')}",
+                    30)
+    # 2. Unchecked groceries -> provision run
+    for c in next_up:
+        if c.get("id") == "grocery-list":
+            propose("gen-provisions", "Kitchen", "Do the grocery run",
+                    "Gather Provisions!",
+                    f"Waiting on the list: {c.get('detail', '')}",
+                    "MIA noticed the grocery list has unchecked items",
+                    25)
+    # 3. Maintenance due -> asset quests
+    for c in list(attention) + list(next_up):
+        cid = c.get("id", "")
+        if cid.startswith(("maint-task-", "garage-task-")):
+            title = c.get("title", "Maintenance task")
+            asset = title.split(":")[-1].strip() if ":" in title else title
+            if "mower" in asset.lower() or "deere" in asset.lower():
+                epic = "Feed the Steel Beast!"
+            elif c.get("area") == "Greenhouse":
+                epic = "Tend the Living Machine!"
+            else:
+                epic = f"Tend the {asset}!"
+            propose(f"gen-{cid}", c.get("area", "Property"), title, epic,
+                    c.get("detail", ""),
+                    f"MIA noticed this maintenance is coming due: {title}",
+                    40)
+    # 4. Over-target spending -> vault audit
+    for c in attention:
+        if "over budget" in (c.get("title", "") + c.get("detail", "")).lower():
+            cat = c.get("title", "spending").replace(" over budget", "")
+            propose("gen-audit-vault", "Budget",
+                    f"Reign in {cat} spending", "Audit the Vault!",
+                    c.get("detail", ""),
+                    f"MIA noticed {cat} is over its monthly target",
+                    40)
+    # 5. Workout gap -> rekindle quest (only if no workout quest exists)
+    def _is_workout_quest(q):
+        blob = f"{q.get('area', '')} {q.get('title', '')}".lower()
+        return ("workout" in blob or "fitness" in blob or "gym" in blob
+                or "run" in blob or "push" in blob or "lift" in blob)
+    for c in tracked:
+        if c.get("id") == "workout-last" and not any(
+                _is_workout_quest(q) for q in quests):
+            propose("gen-rekindle", "Workout", "Get moving again",
+                    "Rekindle the Flame!",
+                    c.get("detail", ""),
+                    f"MIA noticed {c.get('title', 'it has been a while')}",
+                    35)
+    # 6. Overdue bills -> settle reminders (reminders only — paying stays
+    #    phone/desktop-only; she proposes the nudge, never the transfer)
+    for c in attention:
+        if c.get("area") == "Budget" and "overdue" in c.get("title", "").lower():
+            bill = c.get("title", "bill").replace(" is overdue", "")
+            propose(f"gen-settle-{c.get('id', 'bill')}", "Budget",
+                    f"Settle the {bill}", "Settle the Debt Scroll!",
+                    c.get("detail", ""),
+                    f"MIA noticed the {bill} is overdue",
+                    15)
+    return suggested
+
+
 CONTEXT_WEIGHTS = {
     "critical": 160, "warning": 100, "info": 40,
     "overdue_per_day": 5,
@@ -1064,6 +1218,7 @@ def main():
         map_kitchen_cards(args.mia_data, _today, attention, next_up, tracked)
         map_workout_cards(args.mia_data, _today, tracked)
         map_property_cards(args.mia_data, _today, attention, next_up)
+        map_garage_cards(args.mia_data, _today, attention, next_up)
 
     quests = []
     if args.missions:
@@ -1099,6 +1254,9 @@ def main():
     for q in quests:
         if isinstance(q, dict) and "voice" not in q:
             q["voice"] = quest_voice(q)
+    today = dt.date.today()
+    suggested = generate_missions(args.mia_data, today, attention,
+                                  next_up, tracked, quests)
     brief = build_brief(attention, proposals, tracked, quests)
     answer = build_answer(attention, proposals, quests)
 
@@ -1116,6 +1274,7 @@ def main():
         "tracked": tracked,
         "next_up": next_up,
         "quests": quests,
+        "suggested": suggested,
     }
     modules = {}
     if args.mia_data:
