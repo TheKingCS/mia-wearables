@@ -105,15 +105,29 @@ Notes:
    the native boundary. Note layout/scroll/readability issues.
 3. **Simulator pass:** Meta Ray-Ban Display Simulator Chrome extension —
    600×600 frame, bright/dark scenes, quality checklist.
-4. **Proposal write-back.** Approvals currently persist in browser
-   localStorage only. Build a small authenticated endpoint on the homestead
-   side that calls `start_experiment()` / `approve_parameter_change()` /
-   `deny_parameter_change()` from `core/experiment_manager.py`, and have the
-   app POST decisions there. Safety rule stands: approval changes the
-   *target*; the Safety MCU's hard limits still gate every dose.
-5. **Windows Scheduled Task** running the export pipeline every few minutes.
-6. **Stable HTTPS hosting** to replace the Cloudflare quick tunnel.
-7. **Voice interaction** (Phase 2): map voice queries to MIA tools.
+4. **Proposal write-back.** Spec: `docs/write-back-spec.md`. Approvals
+   currently persist in browser localStorage only. New `server/proposal_api.py`
+   (homestead repo, stdlib HTTP, loopback 8777, bearer token, feature flag
+   `MIA_PROPOSAL_API_ENABLED=1`) routes decide calls to
+   `start_experiment()` / `approve_parameter_change()` /
+   `deny_parameter_change()`. The manager functions have **no status
+   guards** — the endpoint must add them (only act when status='proposed',
+   idempotent replays → 200, conflicts → 409), serialize decides with a
+   lock, and audit every attempt to `automated_action_log`. Experiment
+   "dismiss" has no manager path (422 in v1). Safety rule stands: approval
+   changes the *target*; the Safety MCU's hard limits still gate every dose.
+5. **Muse ↔ MIA bridge.** Spec: `docs/muse-bridge-spec.md`. MIA phone
+   server (8765) extended with `/api/bridge/*` (health/state/brief/
+   proposals + confirm-gated decide/quests). Muse reads real state,
+   proposes, submits only on explicit user confirmation; token in secure
+   vault; honest staleness when the laptop is asleep.
+6. **Windows Scheduled Task** running the export pipeline every few minutes.
+7. **Stable HTTPS hosting** to replace the Cloudflare quick tunnel.
+8. **Voice (Phase 2).** Spec: `docs/voice-spec.md` — implement the
+   exporter `brief` + Ask section + intent matcher + read-back.
+9. **Phase 3 native companion.** Draft: `docs/phase3-companion-draft.md`
+   — DAT (Maven Central `com.meta.wearable` 0.9.0), fold cards into the
+   existing `android/` app, M1–M4 milestones.
 
 ## Gotchas learned the hard way
 
