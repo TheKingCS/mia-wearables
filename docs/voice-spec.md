@@ -3,6 +3,12 @@
 Goal: voice interaction on Ray-Ban Display that respects both Meta's
 platform constraints and MIA's read/propose/approve principle.
 
+Two hardware surfaces share one routing layer (locked 2026-10-01):
+- **Surface 1 — Ray-Ban Display** (this doc's main text): system composer
+  in, glanceable card + speechSynthesis out.
+- **Surface 2 — camera/audio glasses** (Zac's current pairs; see the
+  dedicated section below): true voice in/out through MIA's companion.
+
 ## The platform constraint that shapes everything
 
 Meta Web Apps on Ray-Ban Display **do not support the microphone**
@@ -110,7 +116,10 @@ offline and fast:
   "greenhouse": "Cell 2: pH 6.9, EC 1.9 — all in band.",
   "attention": "2 things need you: pH drift high; fish feeder 2 days overdue.",
   "proposals": "2 proposals waiting: 1 experiment, 1 parameter change.",
-  "quests": "2 quests open, 65 XP available."
+  "quests": "2 quests open, 65 XP available.",
+  "finance": "October: $1,240 of $2,000 (62%) — on pace.",
+  "workout": "Last: Push day · 42 min · 4 days ago.",
+  "kitchen": "Pantry: 24 items tracked · 2 expiring soon."
 }
 ```
 
@@ -125,6 +134,34 @@ item lookup for proposals ("read the pH proposal").
   friction, not more notifications" applies to speech most of all.
 - Silence is the default. Reading proposals aloud happens only when
   asked ("read me my proposals").
+
+## Surface 2 — camera/audio glasses (locked 2026-10-01)
+
+Zac's current hardware: two pairs of Ray-Ban Meta-style glasses (camera +
+audio, **no display**) plus a Meta Quest. The Display pair is a planned
+purchase. This surface runs on the audio pairs, today.
+
+- **Audio path**: glasses mic/speaker ↔ MIA's Android companion
+  (hands-free listening, Vosk STT on the phone) ↔ MIA phone server
+  (:8765, per-profile bearer auth; `/api/bridge/*` when built). **Wake
+  path (locked)**: the companion's existing hands-free wake — the
+  glasses are the audio endpoint. MIA is never reached via "Hey Meta";
+  that wakes Meta's assistant, not MIA.
+- **Brief-first**: with no screen, the exporter's `brief` one-liners are
+  the interface. One sentence per answer (fast, offline-capable).
+  Evidence is read aloud only on request ("tell me more").
+- **Spoken confirm (locked, decision 2a)**: voice proposes → reads the
+  summary + safety note → the user says "confirm" or "dismiss". Allowed
+  for Gate A experiments and Gate B parameter changes (both change
+  targets; the Safety MCU still gates every actuation). **Money-moving
+  approvals** (budget sweeps, debt payments) stay on phone/desktop in
+  v1. One at a time; batch is refused, as everywhere. Every voice
+  decision is logged with channel `voice`.
+- **Quest composition**: identical to the composer flow — the garden
+  case is its natural home ("add a quest: water the seedlings").
+- **Camera**: Meta's, not ours. MIA has no live access to the glasses'
+  camera today; visual input arrives via the phone until the platform
+  opens it up.
 
 ## Orion-class trajectory
 

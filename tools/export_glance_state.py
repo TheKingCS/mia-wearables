@@ -14,6 +14,10 @@ Builds webapp/state.json for the MIA Glance web app from live sources:
   - MIA data dir (--mia-data)         ->  budget / real estate / kitchen /
                                           workout / property-maintenance
                                           cards across every section
+
+Every export also emits `brief`: one-line natural-language summaries
+(greenhouse / attention / proposals / quests / finance / workout /
+kitchen) for voice surfaces (see docs/voice-spec.md).
   - optional quests JSON file         ->  quests    (fallback when --missions omitted)
 
 Proposals are the real homestead approval queue, not stand-ins: Gate A
@@ -585,6 +589,60 @@ def map_property_cards(data_dir, today, attention, next_up):
                     "proposal": None,
                 })
 
+
+def _area_card(cards, prefix):
+    for c in cards:
+        if (c.get("area") or "").startswith(prefix):
+            return c
+    return None
+
+
+def _top_titles(cards, n=2):
+    return "; ".join(c.get("title", "") for c in cards[:n] if c.get("title"))
+
+
+def build_brief(attention, proposals, tracked, quests):
+    """One-line natural-language summaries for voice surfaces.
+
+    Derived from the mapped cards so voice always agrees with the glance.
+    Missing data says so honestly ("No budget data right now.").
+    """
+    if attention:
+        n = len(attention)
+        b_attention = f"{n} thing{'s' if n != 1 else ''} need{'s' if n == 1 else ''} you"
+        tt = _top_titles(attention)
+        b_attention += f": {tt}." if tt else "."
+    else:
+        b_attention = "Nothing needs you."
+    if proposals:
+        n = len(proposals)
+        b_proposals = f"{n} proposal{'s' if n != 1 else ''} waiting"
+        tt = _top_titles(proposals, 1)
+        b_proposals += f": {tt}." if tt else "."
+    else:
+        b_proposals = "No proposals waiting."
+    xp = sum(int(q.get("xp") or 0) for q in quests if isinstance(q, dict))
+    n = len(quests)
+    b_quests = (f"{n} quest{'s' if n != 1 else ''} open"
+                + (f", {xp} XP available." if xp else "."))
+    gh = _area_card(tracked, "Greenhouse")
+    b_greenhouse = gh.get("title") if gh else "No live greenhouse data right now."
+    fin = _area_card(attention, "Budget") or _area_card(tracked, "Budget")
+    b_finance = fin.get("title") if fin else "No budget data right now."
+    wrk = _area_card(tracked, "Workout")
+    b_workout = wrk.get("title") if wrk else "No workout data right now."
+    kit = _area_card(tracked, "Kitchen")
+    b_kitchen = kit.get("title") if kit else "No pantry data right now."
+    return {
+        "greenhouse": b_greenhouse,
+        "attention": b_attention,
+        "proposals": b_proposals,
+        "quests": b_quests,
+        "finance": b_finance,
+        "workout": b_workout,
+        "kitchen": b_kitchen,
+    }
+
 def load_missions_quests(missions_path, profile_id=None):
     """Extract today's active quests from MIA's data/missions.json.
 
@@ -692,7 +750,10 @@ def main():
         if current and isinstance(current.get("quests"), list):
             quests = current["quests"]
 
+    brief = build_brief(attention, proposals, tracked, quests)
+
     state = {
+        "brief": brief,
         "meta": {
             "source": "live" if (dash or args.mia_data) else "mock",
             "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
