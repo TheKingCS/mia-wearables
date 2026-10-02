@@ -57,7 +57,37 @@ queries to MIA tools. Two classes:
 |---|---|
 | "Approve the pH proposal" / "start the experiment" | Card renders the proposal with evidence + safety note; **second explicit confirmation required** ("Say 'confirm' or press Approve"). Only then does the decision write. |
 | "Deny the parameter change" | Same flow, "dismiss" path. |
-| "Dismiss all" | Refused — decisions are one at a time, never batched. |
+| "Dismiss all" | Refused — decisions are one at a time, never batched. Locked in per Zac 2026-10-01. |
+
+## Voice quest composition
+
+Approved by Zac 2026-10-01: "MIA, add a quest: water the seedlings" is a
+supported flow. Adding a quest is a state change, so it follows the same
+two-step pattern as approvals:
+
+1. The query parses the quest title (everything after "add a quest:")
+   and an optional recurrence keyword — "daily", "weekly" (e.g. "add a
+   daily quest: stretch").
+2. The app renders a **draft quest card**: title, area ("Voice" unless
+   inferrable), 10 XP default, recurrence if given. Nothing is written
+   yet.
+3. The user confirms ("Add quest" / "yes") — a single explicit action —
+   and the draft is captured on-device with a `pending_add` marker.
+
+Write-back: the draft flows through the same on-device → homestead/MIA
+channel as approvals. For MIA missions this means appending to
+`data/missions.json` with `mission_type: "OPTIONAL MISSION"` (or
+"DAILY MISSION" for daily), `status: "active"`, and
+`occurrence_key: <today>` for dailies — the same fields the
+`--missions` exporter already reads. Until that channel exists,
+drafts stay queued on-device with a visible "waiting to sync" note.
+
+Guardrails:
+- XP is not settable by voice beyond the 10 XP default; difficulty
+  and rewards are tuned on phone/desktop.
+- Malformed quests ("add a quest") get one clarifying ask, not a guess.
+- Composed quests are always single, never batched ("add three quests"
+  is refused like "dismiss all").
 
 **Guardrails:**
 - Destructive/irreversible actions (dosing changes, actuator control)
