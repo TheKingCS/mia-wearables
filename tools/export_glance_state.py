@@ -675,6 +675,7 @@ def map_workout_cards(data_dir, today, tracked):
         "title": " · ".join(bits),
         "detail": ("Streak from recurring fitness missions "
                    "shows in Today's quests."),
+        "days": days,
         "severity": "warning" if days >= 3 else "info",
         "action": "Open on phone",
         "proposal": None,
@@ -999,6 +1000,9 @@ def _decision_suppresses(mid, d):
     if d.get("decision") == "dismissed":
         return age_days < NOVELTY_DAYS
     if d.get("decision") == "accepted":
+        snap = d.get("snapshot") or {}
+        if snap.get("once"):
+            return True  # one-shot missions never re-suggest once accepted
         return age_days < ACCEPT_SUPPRESS_DAYS
     return False
 
@@ -1105,7 +1109,8 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests,
     suppressed = {mid for mid, d in (decisions or {}).items()
                   if _decision_suppresses(mid, d)}
 
-    def propose(mid, region, title, epic, detail, reason, xp, bonus_tasks=None):
+    def propose(mid, region, title, epic, detail, reason, xp, bonus_tasks=None,
+                once=False):
         if (region, title.lower()) in have:
             return  # don't suggest what's already a quest
         if mid in have_ids or mid in suppressed:
@@ -1116,12 +1121,47 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests,
             "id": mid, "area": region, "title": title,
             "detail": detail, "xp": xp,
             "epic_name": epic, "bonus_tasks": bonus_tasks or [],
+            "once": once,
             "rarity": rarity_for(xp),
             "reason": reason,
             "source": "mia-generated",
             "voice": quest_voice(q),
         })
         have.add((region, title.lower()))
+
+    # Cross-module procurement signals, computed early: the standalone
+    # grocery trigger yields when the grand supply run absorbs it, and an
+    # active supply-run mission covers groceries while it is open.
+    PROCURE_WORDS = ("buy ", "order ", "pick up", "parts", "replace ",
+                     "refill", "restock", "low on")
+    supply_signals = []  # (area, label)
+    _seen_signal = set()
+    def _add_signal(area, label):
+        # Dedupe by title: a tool task may surface as both Property and
+        # Garage cards by design; it is still one errand.
+        key = (label or "").lower()
+        if key and key not in _seen_signal:
+            _seen_signal.add(key)
+            supply_signals.append((area, label))
+    for c in next_up:
+        if c.get("id") == "grocery-list":
+            _add_signal(c.get("area", "Kitchen"),
+                        c.get("title", "groceries"))
+    for c in list(attention) + list(next_up):
+        cid = c.get("id", "")
+        if cid in ("grocery-list",) or cid.startswith("bill-"):
+            continue
+        blob = (c.get("title", "") + " " + c.get("detail", "")).lower()
+        if any(w in blob for w in PROCURE_WORDS):
+            _add_signal(c.get("area", ""), c.get("title", ""))
+    supply_areas = {a for a, _ in supply_signals if a}
+    supply_run_fires = (
+        len(supply_signals) >= 2 and len(supply_areas) >= 2
+        and "gen-supply-run" not in have_ids
+        and "gen-supply-run" not in suppressed
+    )
+    supply_run_active = any(q.get("suggestion_id") == "gen-supply-run"
+                            for q in quests)
 
     # 1. Expiring food -> use-it-up quest
     for c in attention:
@@ -1132,19 +1172,27 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests,
                     "MIA noticed expiring items: "
                     f"{c.get('detail', 'check the pantry')}",
                     30)
-    # 2. Unchecked groceries -> provision run
+    # 2. Unchecked groceries -> provision run (yields when the grand
+    # supply run absorbs it, or while an accepted supply run is open)
     for c in next_up:
         if c.get("id") == "grocery-list":
+            if supply_run_fires or supply_run_active:
+                continue
             propose("gen-provisions", "Kitchen", "Do the grocery run",
                     "Gather Provisions!",
                     f"Waiting on the list: {c.get('detail', '')}",
                     "MIA noticed the grocery list has unchecked items",
                     25)
-    # 3. Maintenance due -> asset quests
+    # 3. Maintenance due -> asset quests. Dedupe by title: a tool task
+    # may surface as both a Property and a Garage card by design.
+    _seen_maint = set()
     for c in list(attention) + list(next_up):
         cid = c.get("id", "")
         if cid.startswith(("maint-task-", "garage-task-")):
             title = c.get("title", "Maintenance task")
+            if title.lower() in _seen_maint:
+                continue
+            _seen_maint.add(title.lower())
             asset = title.split(":")[-1].strip() if ":" in title else title
             if "mower" in asset.lower() or "deere" in asset.lower():
                 epic = "Feed the Steel Beast!"
@@ -1165,7 +1213,9 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests,
                     c.get("detail", ""),
                     f"MIA noticed {cat} is over its monthly target",
                     40)
-    # 5. Workout gap -> rekindle quest (only if no workout quest exists)
+    # 5. Workout gap -> tiered rekindle quests (only if no workout quest
+    # exists). days < 3 means he just worked out — no mission. (This used
+    # to fire even the same day; fixed.)
     def _is_workout_quest(q):
         blob = f"{q.get('area', '')} {q.get('title', '')}".lower()
         return ("workout" in blob or "fitness" in blob or "gym" in blob
@@ -1173,11 +1223,21 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests,
     for c in tracked:
         if c.get("id") == "workout-last" and not any(
                 _is_workout_quest(q) for q in quests):
-            propose("gen-rekindle", "Workout", "Get moving again",
-                    "Rekindle the Flame!",
-                    c.get("detail", ""),
-                    f"MIA noticed {c.get('title', 'it has been a while')}",
-                    35)
+            days = c.get("days", 0) or 0
+            if days >= 7:
+                propose("gen-rekindle", "Workout", "Get moving again",
+                        "Reignite the Inferno!",
+                        c.get("detail", ""),
+                        f"MIA noticed it's been {days} days since your "
+                        f"last workout",
+                        50)
+            elif days >= 3:
+                propose("gen-rekindle", "Workout", "Get moving again",
+                        "Rekindle the Flame!",
+                        c.get("detail", ""),
+                        f"MIA noticed it's been {days} days since your "
+                        f"last workout",
+                        35)
     # 6b. Seasonal pack quests — calendar-driven, only for subscribers
     packs = packs or {}
     enabled = enabled_packs if enabled_packs is not None else {
@@ -1227,6 +1287,66 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests,
                     c.get("detail", ""),
                     f"MIA noticed the {bill} is overdue",
                     15)
+
+    # 7. Bills due soon — same scroll, earlier. Reminder only.
+    for c in next_up:
+        cid = c.get("id", "")
+        if not cid.startswith("bill-"):
+            continue
+        title = c.get("title", "")
+        if " due in " not in title:
+            continue
+        name, when = title.split(" due in ", 1)
+        try:
+            days = int(when.split()[0])
+        except (ValueError, IndexError):
+            continue
+        if days <= 3:
+            propose(f"gen-{cid}-soon", "Budget",
+                    f"Settle the {name}", "Settle the Debt Scroll!",
+                    c.get("detail", ""),
+                    f"MIA noticed the {name} is due in {days} "
+                    f"{'day' if days == 1 else 'days'}",
+                    15)
+
+    # 9. Completed experiments -> review the results. One-shot: once
+    # accepted it never re-suggests; dismissed it stays quiet a week.
+    for c in tracked:
+        cid = c.get("id", "")
+        if not cid.startswith("exp-done-"):
+            continue
+        label = c.get("title", "experiment")
+        propose(f"gen-review-{cid[len('exp-done-'):]}", "Greenhouse",
+                f"Review the {label} results", "Decipher the Harvest Codex!",
+                c.get("detail", ""),
+                f"MIA noticed the {label} experiment finished — "
+                f"results are in",
+                45, once=True)
+
+    # 10. Cross-module supply run — the "you're already going to Lowe's"
+    # synthesis: errands stacking up across areas become one trip.
+    if supply_run_fires:
+        detail = "; ".join(f"{a}: {label}"
+                           for a, label in supply_signals[:6])
+        propose("gen-supply-run", "Missions",
+                "Do the supply run", "The Grand Supply Run!",
+                detail,
+                f"MIA noticed errands stacking up across {len(supply_areas)} "
+                f"areas — one trip could clear them",
+                40)
+
+    # 11. Attention avalanche — several things need him at once: one
+    # focused sweep instead of scattered triage.
+    if len(attention) >= 3:
+        titles = "; ".join(c.get("title", "") for c in attention[:4])
+        if len(attention) > 4:
+            titles += "…"
+        propose("gen-tame-hydra", "Missions",
+                "Clear the decks", "Tame the Hydra!",
+                titles,
+                f"MIA noticed {len(attention)} things need you at once — "
+                f"one focused sweep",
+                45)
     return suggested
 
 
@@ -1405,6 +1525,28 @@ def main():
             if isinstance(e, dict):
                 if e.get("status") == "proposed":
                     proposals.append(map_experiment_proposal(e, cell_names))
+                elif e.get("status") == "completed":
+                    # Finished experiments with results become a tracked
+                    # card; generate_missions() turns it into a one-shot
+                    # "review the results" quest. Defensive: unknown
+                    # dashboard shapes simply yield no card.
+                    result = (e.get("result_summary") or e.get("conclusion")
+                              or e.get("outcome") or "")
+                    if isinstance(result, str) and result.strip():
+                        var = PARAM_LABELS.get(e.get("variable_changed") or "",
+                                               e.get("variable_changed")
+                                               or "experiment")
+                        cell = cell_names.get(e.get("cell_id"),
+                                              f"Cell {e.get('cell_id')}")
+                        tracked.append({
+                            "id": f"exp-done-{e.get('id')}",
+                            "area": "Greenhouse",
+                            "title": f"{var} ({cell})",
+                            "detail": result.strip()[:220],
+                            "severity": "info",
+                            "action": "Open on phone",
+                            "proposal": None,
+                        })
                 hypotheses[e.get("id")] = e.get("hypothesis", "")
     if args.db:
         for r in load_gate_b_proposals(args.db):
