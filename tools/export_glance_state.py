@@ -1078,14 +1078,74 @@ def build_cookbook(data_dir):
     return books
 
 
-def build_voice(data_dir):
+def build_voice(data_dir, settings_path=None):
     """The voice runtime's data plane: scripts, routing, cookbook."""
     return {
         "scripts": VOICE_SCRIPTS,
         "intents": VOICE_INTENTS,
         "cookbook": build_cookbook(data_dir) if data_dir else [],
+        "settings": load_voice_settings(settings_path),
         "note": "Same data as the glance — voice never disagrees with it.",
     }
+
+
+# Voice frequency/verbosity are per-user preferences, not constants.
+# The gate stays conservative by default (MIA's "less friction" principle);
+# Zac runs Chatty. Profiles are presets; the file can override any field.
+VOICE_FREQUENCY_PRESETS = {
+    "quiet": {"label": "Quiet", "max_proactive_per_day": 3,
+              "min_spacing_minutes": 120,
+              "blurb": "She speaks rarely, only when it really matters."},
+    "normal": {"label": "Normal", "max_proactive_per_day": 5,
+               "min_spacing_minutes": 90,
+               "blurb": "The classic gate: a few useful nudges a day."},
+    "chatty": {"label": "Chatty", "max_proactive_per_day": 10,
+               "min_spacing_minutes": 30,
+               "blurb": "She thinks out loud more — missions, nudges, ideas."},
+}
+VOICE_VERBOSITY_PRESETS = {
+    "brief": {"label": "Brief",
+              "blurb": "One-liners only. Details stay on the card."},
+    "normal": {"label": "Normal",
+               "blurb": "One-liner plus the key detail."},
+}
+DEFAULT_VOICE_SETTINGS = {
+    "frequency": "normal",
+    "verbosity": "brief",
+    "speak_missions": True,   # spoken "New mission: ..." on audio surfaces
+    "voice_enabled": True,     # master switch for her speaking at all
+}
+
+
+def load_voice_settings(path=None):
+    """Merge DEFAULT_VOICE_SETTINGS with an optional JSON override file.
+
+    The override may set frequency/verbosity/speak_missions/voice_enabled
+    directly, or tune the gate numbers (max_proactive_per_day,
+    min_spacing_minutes) for a fully custom profile.
+    """
+    settings = dict(DEFAULT_VOICE_SETTINGS)
+    if path:
+        try:
+            override = json.loads(Path(path).read_text())
+        except (OSError, ValueError):
+            override = None
+        if isinstance(override, dict):
+            for k, v in override.items():
+                if k in settings or k in ("max_proactive_per_day",
+                                          "min_spacing_minutes"):
+                    settings[k] = v
+    freq = VOICE_FREQUENCY_PRESETS.get(settings.get("frequency"), {})
+    settings["gate"] = {
+        "max_proactive_per_day": settings.get(
+            "max_proactive_per_day", freq.get("max_proactive_per_day", 5)),
+        "min_spacing_minutes": settings.get(
+            "min_spacing_minutes", freq.get("min_spacing_minutes", 90)),
+    }
+    settings["frequency_label"] = freq.get("label", settings.get("frequency"))
+    settings["verbosity_label"] = VOICE_VERBOSITY_PRESETS.get(
+        settings.get("verbosity"), {}).get("label", settings.get("verbosity"))
+    return settings
 
 
 def apply_workouts(logs_path, data_dir):
@@ -1674,6 +1734,10 @@ def main():
     ap.add_argument("--workout-logs", default=None,
                     help="Path to workout_logs.jsonl — voice-logged "
                          "workouts from the surface (default: next to --out).")
+    ap.add_argument("--voice-settings", default=None,
+                    help="Path to voice_settings.json — per-user voice "
+                         "frequency/verbosity overrides "
+                         "(default: next to --out, if present).")
     ap.add_argument("--out", default="webapp/state.json")
     args = ap.parse_args()
 
@@ -1794,7 +1858,9 @@ def main():
                                   decisions=decisions)
     brief = build_brief(attention, proposals, tracked, quests)
     answer = build_answer(attention, proposals, quests)
-    voice = build_voice(args.mia_data)
+    vsettings = args.voice_settings or str(Path(args.out).parent / "voice_settings.json")
+    voice = build_voice(args.mia_data,
+                        settings_path=vsettings if Path(vsettings).is_file() else None)
 
     # Voice-logged workouts: confirm-gated on the surface, applied here.
     if args.apply_workouts:

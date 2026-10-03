@@ -11,6 +11,10 @@ write endpoints for the confirm-gated flows:
       -> appends a JSON line to webapp/workout_logs.jsonl
          (channel: voice; applied by exporter --apply-workouts)
 
+    POST /api/voice-settings      {frequency, verbosity, ...}
+      -> writes webapp/voice_settings.json (gitignored); the exporter
+         merges it into state.voice.settings on the next export
+
 The exporter picks those files up via --decisions / --workout-logs
 (defaults: next to --out); --apply-decisions materializes accepted
 suggestions as real missions in MIA's data/missions.json and
@@ -36,6 +40,7 @@ from pathlib import Path
 class Handler(SimpleHTTPRequestHandler):
     decisions_file = None
     workout_logs_file = None
+    voice_settings_file = None
 
     def _json(self, code, obj):
         body = json.dumps(obj).encode()
@@ -88,6 +93,20 @@ class Handler(SimpleHTTPRequestHandler):
             }
             self._append_jsonl(self.workout_logs_file, entry)
             return self._json(200, {"ok": True})
+        if path == "/api/voice-settings":
+            # Per-user voice preferences: frequency/verbosity presets,
+            # spoken-mission toggle, master voice switch. The exporter
+            # merges this file into state.voice.settings on next export.
+            if not isinstance(payload, dict):
+                return self._json(400, {"error": "need a JSON object"})
+            allowed = {"frequency", "verbosity", "speak_missions",
+                       "voice_enabled", "max_proactive_per_day",
+                       "min_spacing_minutes"}
+            clean = {k: v for k, v in payload.items() if k in allowed}
+            p = Path(self.voice_settings_file)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(clean, indent=2))
+            return self._json(200, {"ok": True, "settings": clean})
         return self._json(404, {"error": "not found"})
 
     def log_message(self, fmt, *args):  # quieter than the default
@@ -103,11 +122,13 @@ def main():
     root = Path(args.dir)
     Handler.decisions_file = str(root / "mission_decisions.jsonl")
     Handler.workout_logs_file = str(root / "workout_logs.jsonl")
+    Handler.voice_settings_file = str(root / "voice_settings.json")
     handler = partial(Handler, directory=str(root))
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     print(f"Serving {root}/ on http://127.0.0.1:{args.port} "
           f"(POST /api/mission-decision -> {Handler.decisions_file}; "
-          f"POST /api/workout-log -> {Handler.workout_logs_file})")
+          f"POST /api/workout-log -> {Handler.workout_logs_file}; "
+          f"POST /api/voice-settings -> {Handler.voice_settings_file})")
     srv.serve_forever()
 
 

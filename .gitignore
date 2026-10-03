@@ -1,4 +1,5 @@
 # local runtime state — never commit
 webapp/mission_decisions.jsonl
 webapp/workout_logs.jsonl
+webapp/voice_settings.json
 webapp/config.local.js
