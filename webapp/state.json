@@ -25,9 +25,197 @@
     "workout": "Last: Push day \u00b7 42 min \u00b7 4 days ago",
     "kitchen": "Pantry: 3 items tracked \u00b7 2 expiring soon"
   },
+  "voice": {
+    "scripts": {
+      "who": "I'm MIA, your personal assistant. I run on your own machines, so your life stays yours \u2014 I keep track of it and speak up only when something's useful.",
+      "can": "I watch your bills and budget, workouts, pantry and recipes, greenhouse, properties, and your quests. Ask what's due, what you can cook, or how your week's going \u2014 and I can log things and add quests when you say yes.",
+      "help": "Try: 'What needs me?' \u2014 'What's due this week?' \u2014 'Read me a recipe.' \u2014 'Log my workout.' \u2014 or 'Add a quest.'",
+      "know": "Everything I know lives on your machines \u2014 your modules, missions, and Life State. Nothing leaves unless you send it."
+    },
+    "intents": [
+      {
+        "intent": "who",
+        "kind": "script",
+        "target": "who",
+        "patterns": [
+          "who are you",
+          "your name",
+          "introduce yourself"
+        ]
+      },
+      {
+        "intent": "can",
+        "kind": "script",
+        "target": "can",
+        "patterns": [
+          "what can you do",
+          "capabilities",
+          "what do you do"
+        ]
+      },
+      {
+        "intent": "help",
+        "kind": "script",
+        "target": "help",
+        "patterns": [
+          "help",
+          "what can i ask",
+          "commands",
+          "options"
+        ]
+      },
+      {
+        "intent": "know",
+        "kind": "script",
+        "target": "know",
+        "patterns": [
+          "what do you know about me",
+          "what do you know"
+        ]
+      },
+      {
+        "intent": "workout_log",
+        "kind": "workout_log",
+        "target": null,
+        "patterns": [
+          "log my workout",
+          "log workout",
+          "record workout",
+          "log my run",
+          "log my lift"
+        ]
+      },
+      {
+        "intent": "recipe",
+        "kind": "recipe",
+        "target": null,
+        "patterns": [
+          "recipe",
+          "read me the",
+          "cook the",
+          "what can i cook",
+          "cook something"
+        ]
+      },
+      {
+        "intent": "bills",
+        "kind": "brief",
+        "target": "bills",
+        "patterns": [
+          "bill",
+          "bills",
+          "what's due",
+          "what is due",
+          "payments"
+        ]
+      },
+      {
+        "intent": "budget",
+        "kind": "brief",
+        "target": "finance",
+        "patterns": [
+          "budget",
+          "spending",
+          "money",
+          "how's my budget",
+          "how is my budget"
+        ]
+      },
+      {
+        "intent": "greenhouse",
+        "kind": "brief",
+        "target": "greenhouse",
+        "patterns": [
+          "greenhouse",
+          "plants",
+          "cells",
+          "ph"
+        ]
+      },
+      {
+        "intent": "attention",
+        "kind": "brief",
+        "target": "attention",
+        "patterns": [
+          "what needs me",
+          "needs me",
+          "what's wrong",
+          "what is wrong",
+          "attention"
+        ]
+      },
+      {
+        "intent": "proposals",
+        "kind": "brief",
+        "target": "proposals",
+        "patterns": [
+          "proposal",
+          "proposals",
+          "waiting",
+          "approve"
+        ]
+      },
+      {
+        "intent": "quests",
+        "kind": "brief",
+        "target": "quests",
+        "patterns": [
+          "quest",
+          "quests",
+          "mission",
+          "missions",
+          "today"
+        ]
+      },
+      {
+        "intent": "workout",
+        "kind": "brief",
+        "target": "workout",
+        "patterns": [
+          "workout",
+          "exercise",
+          "gym",
+          "training",
+          "streak"
+        ]
+      },
+      {
+        "intent": "kitchen",
+        "kind": "brief",
+        "target": "kitchen",
+        "patterns": [
+          "kitchen",
+          "pantry",
+          "fridge",
+          "food",
+          "groceries"
+        ]
+      }
+    ],
+    "cookbook": [
+      {
+        "id": "demo-teriyaki",
+        "name": "Teriyaki Chicken",
+        "ingredients": [
+          "1 lb chicken thighs",
+          "1/4 cup soy sauce",
+          "2 tbsp honey",
+          "1 tsp grated ginger"
+        ],
+        "steps": [
+          "Mix the soy sauce, honey, and ginger in a bowl.",
+          "Sear the chicken 5 minutes per side over medium-high heat.",
+          "Pour in the sauce and simmer 4 minutes, until thick and glossy.",
+          "Rest 2 minutes, slice, and serve over rice."
+        ],
+        "time_minutes": 20
+      }
+    ],
+    "note": "Same data as the glance \u2014 voice never disagrees with it."
+  },
   "meta": {
     "source": "mock",
-    "generated_at": "2026-10-03T01:51:37",
+    "generated_at": "2026-10-03T01:57:16",
     "dashboard_generated_at": "2026-10-03T12:00:00",
     "note": "Synthetic demo data \u2014 generated by tools/build_demo_state.py from labeled fixtures shaped like the real schemas. No real homestead or MIA data. The proposal shown is a Gate A experiment proposal; individual dosing is never a proposal."
   },
@@ -742,6 +930,27 @@
       "label": "Kitchen",
       "eyebrow": "Recipes & pantry",
       "items": [
+        {
+          "id": "recipe-demo-teriyaki",
+          "title": "Teriyaki Chicken",
+          "sub": "20 min",
+          "fields": [
+            [
+              "Cook",
+              "20"
+            ]
+          ],
+          "list": {
+            "title": "Ingredients",
+            "items": [
+              "1 lb chicken thighs",
+              "1/4 cup soy sauce",
+              "2 tbsp honey",
+              "1 tsp grated ginger"
+            ]
+          },
+          "note": "4 steps \u2014 cooking mode reads them to you."
+        },
         {
           "id": "pantry",
           "title": "Pantry",

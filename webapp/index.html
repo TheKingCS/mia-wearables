@@ -172,7 +172,43 @@ const MOCK = {
     quests: "2 quests open, 65 XP available.",
     finance: "October: $1,240 of $2,000 (62%) \u2014 on pace.",
     workout: "5-day streak. Last: Push day, 42 min.",
-    kitchen: "Pantry: 24 items tracked \u00b7 2 expiring soon."
+    kitchen: "Pantry: 24 items tracked \u00b7 2 expiring soon.",
+    bills: "Next bill: Internet $80 due in 2 days. 1 more in the next two weeks."
+  },
+  voice: {
+    scripts: {
+      who: "I'm MIA, your personal assistant. I run on your own machines, so your life stays yours \u2014 I keep track of it and speak up only when something's useful.",
+      can: "I watch your bills and budget, workouts, pantry and recipes, greenhouse, properties, and your quests. Ask what's due, what you can cook, or how your week's going \u2014 and I can log things and add quests when you say yes.",
+      help: "Try: 'What needs me?' \u2014 'What's due this week?' \u2014 'Read me a recipe.' \u2014 'Log my workout.' \u2014 or 'Add a quest.'",
+      know: "Everything I know lives on your machines \u2014 your modules, missions, and Life State. Nothing leaves unless you send it."
+    },
+    intents: [
+      { intent: "bills", kind: "brief", target: "bills",
+        patterns: ["bill", "bills", "what's due", "what is due", "payments"] },
+      { intent: "budget", kind: "brief", target: "finance",
+        patterns: ["budget", "spending", "money", "how's my budget", "how is my budget"] },
+      { intent: "greenhouse", kind: "brief", target: "greenhouse",
+        patterns: ["greenhouse", "plants", "cells", "ph"] },
+      { intent: "attention", kind: "brief", target: "attention",
+        patterns: ["what needs me", "needs me", "what's wrong", "what is wrong", "attention"] },
+      { intent: "proposals", kind: "brief", target: "proposals",
+        patterns: ["proposal", "proposals", "waiting", "approve"] },
+      { intent: "quests", kind: "brief", target: "quests",
+        patterns: ["quest", "quests", "mission", "missions", "today"] },
+      { intent: "workout", kind: "brief", target: "workout",
+        patterns: ["workout", "exercise", "gym", "training", "streak"] },
+      { intent: "kitchen", kind: "brief", target: "kitchen",
+        patterns: ["kitchen", "pantry", "fridge", "food", "groceries"] }
+    ],
+    cookbook: [
+      { id: "demo-teriyaki", name: "Teriyaki Chicken",
+        ingredients: ["1 lb chicken thighs", "1/4 cup soy sauce", "2 tbsp honey", "1 tsp grated ginger"],
+        steps: ["Mix the soy sauce, honey, and ginger in a bowl.",
+                "Sear the chicken 5 minutes per side over medium-high heat.",
+                "Pour in the sauce and simmer 4 minutes, until thick and glossy.",
+                "Rest 2 minutes, slice, and serve over rice."],
+        time_minutes: 20 }
+    ]
   },
   attention: [
     { id: "alert-7", area: "Greenhouse", severity: "critical", title: "pH drift high",
@@ -257,6 +293,12 @@ let acceptedMissions = LS.get("accepted_missions", []);
 let pendingSync = LS.get("pending_sync", []);
 let confirmSug = null;
 let celebrating = null;
+/* Voice runtime: ask-anything routing, cooking sessions, workout logs. */
+let voiceAnswer = null;      // {title, body, spoken} rendered response card
+let cooking = null;          // {recipe, step} — step -1 = ingredients
+let workoutDraft = null;     // {name, minutes} awaiting confirm
+let pendingWorkouts = LS.get("pending_workouts", []);
+let pendingWorkoutSync = LS.get("pending_workout_sync", []);
 
 const RARITY_COLOR = {
   Common: "#c9d4dc", Uncommon: "#7dd87d", Rare: "#3ec6ff",
@@ -514,6 +556,230 @@ function acceptSuggestion(s) {
     reward_lines: ["+" + (s.xp || 10) + " XP"], total_xp: s.xp || 10 };
   render(true);
 }
+/* ---- Voice runtime ----
+   Ask-anything routing over the exporter's voice payload (scripts,
+   intents, cookbook). Same data as the glance, so she never disagrees
+   with herself across surfaces. Spoken answers stay short; speech is
+   enhancement — the card always stays visible. */
+function speak(text) {
+  if (!text) return;
+  try {
+    if (!("speechSynthesis" in window)) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+function todayISO() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") +
+         "-" + String(d.getDate()).padStart(2, "0");
+}
+
+function voiceRespond(title, body, spoken) {
+  voiceAnswer = { title, body, spoken: spoken || body };
+  speak(voiceAnswer.spoken);
+  render(false);
+}
+
+function routeVoiceQuery(raw) {
+  const t = (raw || "").toLowerCase().trim();
+  if (!t) return;
+  const V = STATE.voice || {};
+  const brief = STATE.brief || {};
+  const scripts = V.scripts || {};
+  // In a cooking session, Next / Repeat / Done win over everything.
+  if (cooking) {
+    if (/\bdone\b/.test(t) || /\bfinish\b/.test(t)) { endCooking(); return; }
+    if (/\brepeat\b/.test(t) || /\bagain\b/.test(t)) { cookStep(true); return; }
+    if (/\bnext\b/.test(t) || /\bcontinue\b/.test(t) || /\bgo on\b/.test(t) || /\bstart\b/.test(t)) { cookStep(false); return; }
+  }
+  // "Log my workout: push day, 40 minutes" — confirm-gated write.
+  if (/^\s*log\b/.test(t)) { parseWorkoutLog(t); return; }
+  // "Read me the teriyaki recipe."
+  if (/\brecipe\b/.test(t) || /^\s*(cook|read me)\b/.test(t)) { findRecipe(t); return; }
+  // Self-scripts (rule zero: she explains herself, simply).
+  if (t.includes("who are you") || t.includes("your name")) { voiceRespond("Who I am", scripts.who); return; }
+  if (t.includes("what can you do")) { voiceRespond("What I can do", scripts.can); return; }
+  if (t.includes("what do you know")) { voiceRespond("What I know", scripts.know); return; }
+  if (t.includes("help") || t.includes("what can i ask")) { voiceRespond("Help", scripts.help); return; }
+  // Brief reads via the exporter's intent table (first match wins).
+  for (const it of (V.intents || [])) {
+    if (it.kind !== "brief") continue;
+    if ((it.patterns || []).some(p => t.includes(p))) {
+      const ans = brief[it.target];
+      voiceRespond(it.intent, ans || "No data on that right now.");
+      return;
+    }
+  }
+  // One clarification, then silence — she never guesses.
+  voiceRespond("Hmm", "I didn't catch that \u2014 try 'Help' to hear what I can do.");
+}
+
+function findRecipe(t) {
+  const books = ((STATE.voice || {}).cookbook) || [];
+  const q = t.replace(/\b(read me|the|a|an|recipe|recipes|cook|cooking|please|for me)\b/g, " ")
+             .replace(/\s+/g, " ").trim();
+  const hit = books.find(b => {
+    const n = (b.name || "").toLowerCase();
+    return n && (n.includes(q) || (q && q.includes(n)));
+  });
+  if (!hit) {
+    const names = books.map(b => b.name).filter(Boolean);
+    voiceRespond("Recipes", names.length
+      ? "I don't have that one \u2014 I know: " + names.join(", ") + "."
+      : "No recipes loaded right now.");
+    return;
+  }
+  cooking = { recipe: hit, step: -1 };
+  render(false);
+  const ing = hit.ingredients.length
+    ? " You'll need: " + hit.ingredients.join("; ") + "."
+    : "";
+  speak(hit.name + "." + ing + " Say 'start cooking' when ready.");
+}
+
+function cookStep(repeat) {
+  if (!cooking) return;
+  const r = cooking.recipe;
+  if (!repeat) cooking.step += 1;
+  if (cooking.step >= r.steps.length) { endCooking(); return; }
+  render(false);
+  const n = cooking.step + 1;
+  speak("Step " + n + " of " + r.steps.length + ". " + r.steps[cooking.step]);
+}
+
+function endCooking() {
+  if (!cooking) return;
+  const name = cooking.recipe.name;
+  cooking = null;
+  voiceRespond("Done", "Enjoy your " + name + "!", "Done \u2014 enjoy!");
+}
+
+function parseWorkoutLog(t) {
+  let rest = t.replace(/^\s*log(\s+my)?(\s+workout)?\s*:?\s*/, "");
+  const m = rest.match(/(\d+)\s*(minutes|minute|mins|min)\b/);
+  const minutes = m ? parseInt(m[1], 10) : null;
+  let name = m ? rest.replace(m[0], "") : rest;
+  name = name.replace(/[,.\s]+$/g, "").trim();
+  if (!name) {
+    voiceRespond("Log workout", "What should I call it? Try: 'Log my workout: push day, 40 minutes.'");
+    return;
+  }
+  // Title-case the name for the card.
+  name = name.replace(/\w\S*/g, w => w[0].toUpperCase() + w.slice(1));
+  workoutDraft = { name, minutes, date: todayISO() };
+  render(false);
+  speak(name + (minutes ? ", " + minutes + " minutes" : "") + ", today. Log it?");
+}
+
+function confirmWorkoutLog() {
+  if (!workoutDraft) return;
+  const entry = {
+    date: workoutDraft.date,
+    name: workoutDraft.name,
+    duration_minutes: workoutDraft.minutes,
+    logged_at: new Date().toISOString(),
+    channel: "voice"
+  };
+  pendingWorkouts.push(entry);
+  LS.set("pending_workouts", pendingWorkouts);
+  fetch("api/workout-log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(entry)
+  }).then(r => {
+    if (!r.ok) throw new Error("http " + r.status);
+    pendingWorkoutSync = pendingWorkoutSync.filter(x => x !== entry);
+    LS.set("pending_workout_sync", pendingWorkoutSync);
+    render(false);
+  }).catch(() => {
+    if (!pendingWorkoutSync.includes(entry)) {
+      pendingWorkoutSync.push(entry);
+      LS.set("pending_workout_sync", pendingWorkoutSync);
+    }
+    render(false);
+  });
+  workoutDraft = null;
+  voiceRespond("Logged", entry.name + (entry.duration_minutes ? ", " + entry.duration_minutes + " minutes" : "") + " \u2014 logged for today.");
+}
+
+function renderVoiceAnswer(box) {
+  // Cooking session UI takes over the answer area.
+  if (cooking) {
+    const r = cooking.recipe;
+    const w = el("div", "expand sev-info");
+    w.append(el("span", "tag", "COOKING MODE"));
+    w.append(el("div", "ctitle", r.name));
+    if (cooking.step < 0) {
+      if (r.ingredients.length) {
+        const ul = el("ul", "ev");
+        for (const ing of r.ingredients) ul.append(el("li", null, ing));
+        w.append(ul);
+      }
+      const btns = el("div", "btns");
+      const st = el("button", "btn primary", "Start cooking");
+      st.type = "button";
+      st.addEventListener("click", () => cookStep(false));
+      const q = el("button", "btn", "Done");
+      q.type = "button";
+      q.addEventListener("click", endCooking);
+      btns.append(st); btns.append(q);
+      w.append(btns);
+      w.append(el("div", "full", "Hands on the food \u2014 say \"next\", \"repeat\", or \"done\"."));
+    } else {
+      w.append(el("div", "dsum", "Step " + (cooking.step + 1) + " of " + r.steps.length));
+      w.append(el("div", "dsum", r.steps[cooking.step]));
+      const btns = el("div", "btns");
+      const nx = el("button", "btn primary", cooking.step + 1 >= r.steps.length ? "Finish" : "Next");
+      nx.type = "button";
+      nx.addEventListener("click", () => cookStep(false));
+      const rp = el("button", "btn", "Repeat");
+      rp.type = "button";
+      rp.addEventListener("click", () => cookStep(true));
+      const dn = el("button", "btn", "Done");
+      dn.type = "button";
+      dn.addEventListener("click", endCooking);
+      btns.append(nx); btns.append(rp); btns.append(dn);
+      w.append(btns);
+    }
+    box.append(w);
+    return;
+  }
+  // Workout confirm gate: she repeats it back; nothing writes unconfirmed.
+  if (workoutDraft) {
+    const w = el("div", "expand sev-info");
+    w.append(el("span", "tag", "LOG WORKOUT?"));
+    w.append(el("div", "dsum", workoutDraft.name +
+      (workoutDraft.minutes ? ", " + workoutDraft.minutes + " minutes" : "") +
+      ", today. Log it?"));
+    const btns = el("div", "btns");
+    const yes = el("button", "btn primary", "Log it");
+    yes.type = "button";
+    yes.addEventListener("click", confirmWorkoutLog);
+    const no = el("button", "btn", "Cancel");
+    no.type = "button";
+    no.addEventListener("click", () => { workoutDraft = null; render(false); });
+    btns.append(yes); btns.append(no);
+    w.append(btns);
+    w.append(el("div", "full", "No confirm, no write \u2014 ever."));
+    box.append(w);
+    return;
+  }
+  if (voiceAnswer) {
+    const w = el("div", "expand sev-info");
+    w.append(el("span", "tag", "MIA"));
+    w.append(el("div", "dsum", voiceAnswer.body));
+    box.append(w);
+  }
+  if (pendingWorkouts.length) {
+    box.append(el("div", "note", pendingWorkouts.length + " workout" + (pendingWorkouts.length === 1 ? "" : "s") +
+      " logged on this device \u2014 syncs to MIA on the next export."));
+  }
+}
+
 const BRIEF_CHIPS = [
   { key: "attention", area: "Ask MIA", phrase: "\u201CWhat needs me?\u201D" },
   { key: "greenhouse", area: "Greenhouse", phrase: "\u201CWhat's the greenhouse doing?\u201D" },
@@ -580,7 +846,26 @@ function renderAnswer(box) {
 }
 
 function renderAsk(box) {
-  box.append(el("div", "sub", "Say it out loud \u2014 or tap a question. Her best questions are printed so you never guess the words."));
+  box.append(el("div", "sub", "Ask anything \u2014 type or dictate below, she answers out loud. Her best questions are printed so you never guess the words."));
+  const qin = document.createElement("input");
+  qin.className = "askinput"; qin.type = "text";
+  qin.placeholder = '\u201CWhat bills are due?\u201D \u00b7 \u201CRead me the teriyaki recipe\u201D \u00b7 \u201CLog my workout: push day, 40 minutes\u201D';
+  qin.setAttribute("aria-label", "Ask MIA anything");
+  const qbtn = el("button", "btn primary", "Ask MIA");
+  qbtn.type = "button";
+  const askNow = () => {
+    const t = (qin.value || "").trim();
+    if (!t) { qin.focus(); return; }
+    qin.value = "";
+    routeVoiceQuery(t);
+  };
+  qbtn.addEventListener("click", askNow);
+  qin.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); askNow(); }
+    e.stopPropagation();
+  });
+  box.append(qin); box.append(qbtn);
+  renderVoiceAnswer(box);
   const brief = STATE.brief || {};
   for (const chip of BRIEF_CHIPS) {
     const ans = brief[chip.key];
