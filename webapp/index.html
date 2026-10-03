@@ -554,6 +554,13 @@ function acceptSuggestion(s) {
   recordDecision(s, "accepted");
   celebrating = s.voice || { epic_title: s.epic_name || s.title, rarity: s.rarity,
     reward_lines: ["+" + (s.xp || 10) + " XP"], total_xp: s.xp || 10 };
+  // Spoken missions: the fanfare is visual; the voice stays calm —
+  // one line, per the voice settings.
+  const vs = voiceSettings();
+  if (vs.voice_enabled !== false && vs.speak_missions !== false) {
+    speak("New mission: " + (celebrating.epic_title || s.title) +
+          ". Plus " + (s.xp || 10) + " XP.");
+  }
   render(true);
 }
 /* ---- Voice runtime ----
@@ -561,8 +568,38 @@ function acceptSuggestion(s) {
    intents, cookbook). Same data as the glance, so she never disagrees
    with herself across surfaces. Spoken answers stay short; speech is
    enhancement — the card always stays visible. */
+function voiceSettings() {
+  // Merges exporter defaults (state.voice.settings) with this device's
+  // overrides (localStorage). The surface reads through this everywhere.
+  const base = ((STATE.voice || {}).settings) || {};
+  let local = {};
+  try { local = JSON.parse(localStorage.getItem("mia_voice_settings") || "{}"); }
+  catch (e) { local = {}; }
+  return Object.assign({
+    frequency: "normal", verbosity: "brief",
+    speak_missions: true, voice_enabled: true,
+  }, base, local);
+}
+
+function saveVoiceSettings(patch) {
+  const cur = voiceSettings();
+  const next = Object.assign({}, cur, patch);
+  delete next.gate; delete next.frequency_label; delete next.verbosity_label;
+  try { localStorage.setItem("mia_voice_settings", JSON.stringify(next)); }
+  catch (e) {}
+  // Best-effort sync to the dev server so the next export carries it.
+  try {
+    fetch("/api/voice-settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next)
+    }).catch(() => {});
+  } catch (e) {}
+  render(false);
+}
+
 function speak(text) {
   if (!text) return;
+  if (voiceSettings().voice_enabled === false) return;
   try {
     if (!("speechSynthesis" in window)) return;
     speechSynthesis.cancel();
@@ -929,6 +966,68 @@ function renderAsk(box) {
     box.append(el("div", "note", pendingAdds.length + " quest" + (pendingAdds.length === 1 ? "" : "s") +
       " queued on this device \u2014 waiting to sync to MIA's missions."));
   }
+  renderVoiceSettings(box);
+}
+
+/* ---- Voice settings ----
+   Frequency and verbosity are per-user preferences, not constants.
+   The gate stays conservative by default (less friction, not more
+   notifications); the user picks how chatty she is allowed to be. */
+const VOICE_FREQUENCY_OPTIONS = ["quiet", "normal", "chatty"];
+const VOICE_VERBOSITY_OPTIONS = ["brief", "normal"];
+
+function renderVoiceSettings(box) {
+  const s = voiceSettings();
+  box.append(el("div", "sub", "Her voice, your rules"));
+  const card = el("div", "card sev-info");
+  card.append(el("span", "area", "VOICE SETTINGS"));
+  card.append(el("span", "ctitle", "How often she speaks, and how much"));
+
+  const gate = s.gate || {};
+  const freqRow = el("div", "row");
+  freqRow.append(el("span", "action", "Frequency \u2014 " + (s.frequency_label || s.frequency)));
+  const freqBtns = el("div", "btns");
+  for (const f of VOICE_FREQUENCY_OPTIONS) {
+    const b = el("button", "btn" + (s.frequency === f ? " primary" : ""), f);
+    b.type = "button";
+    b.addEventListener("click", () => saveVoiceSettings({ frequency: f }));
+    freqBtns.append(b);
+  }
+  freqRow.append(freqBtns);
+  card.append(freqRow);
+  card.append(el("div", "full", "Currently: up to " + (gate.max_proactive_per_day ?? 5) +
+    " nudges a day, " + (gate.min_spacing_minutes ?? 90) + "+ minutes apart."));
+
+  const verbRow = el("div", "row");
+  verbRow.append(el("span", "action", "Verbosity \u2014 " + (s.verbosity_label || s.verbosity)));
+  const verbBtns = el("div", "btns");
+  for (const v of VOICE_VERBOSITY_OPTIONS) {
+    const b = el("button", "btn" + (s.verbosity === v ? " primary" : ""), v);
+    b.type = "button";
+    b.addEventListener("click", () => saveVoiceSettings({ verbosity: v }));
+    verbBtns.append(b);
+  }
+  verbRow.append(verbBtns);
+  card.append(verbRow);
+
+  const spkRow = el("div", "row");
+  spkRow.append(el("span", "action", "Announce new missions out loud"));
+  const spk = el("button", "btn" + (s.speak_missions !== false ? " primary" : ""), s.speak_missions !== false ? "On" : "Off");
+  spk.type = "button";
+  spk.addEventListener("click", () => saveVoiceSettings({ speak_missions: !(s.speak_missions !== false) }));
+  spkRow.append(spk);
+  card.append(spkRow);
+
+  const masterRow = el("div", "row");
+  masterRow.append(el("span", "action", "Her voice"));
+  const mst = el("button", "btn" + (s.voice_enabled !== false ? " primary" : ""), s.voice_enabled !== false ? "On" : "Muted");
+  mst.type = "button";
+  mst.addEventListener("click", () => saveVoiceSettings({ voice_enabled: !(s.voice_enabled !== false) }));
+  masterRow.append(mst);
+  card.append(masterRow);
+
+  card.append(el("div", "full", "Settings save on this device and sync into the next export \u2014 she never disagrees with herself."));
+  box.append(card);
 }
 
 function render(refocus) {
