@@ -1,0 +1,18 @@
+{
+  "pack_id": "seasonal-celebrations",
+  "name": "Seasonal Celebrations",
+  "description": "Holiday decorating and seasonal rituals. Opt-in: only fires for people who subscribe to the pack.",
+  "default_enabled": false,
+  "quests": [
+    {"mission_id": "seas-fall-01", "name": "Decorate for fall", "epic_name": "Raise the Autumn Banners!", "summary": "Porch, mantel, table — bring the harvest colors inside.", "region": "Household", "recurring_kind": "yearly", "reward_xp": 40, "window": {"start": "09-15", "end": "11-15"},
+     "bonus_tasks": [{"name": "Carve or paint pumpkins", "xp": 15}]},
+    {"mission_id": "seas-halloween-01", "name": "Halloween setup", "epic_name": "Summon the Halloween Spirits!", "summary": "Decorations, costume plan, candy stock.", "region": "Household", "recurring_kind": "yearly", "reward_xp": 50, "window": {"start": "10-01", "end": "10-31"},
+     "bonus_tasks": [{"name": "Plan the costume", "xp": 15}, {"name": "Stock the candy", "xp": 10}]},
+    {"mission_id": "seas-thanks-01", "name": "Thanksgiving prep", "epic_name": "Prepare the Harvest Feast!", "summary": "Menu, guest list, the big cook.", "region": "Kitchen", "recurring_kind": "yearly", "reward_xp": 60, "window": {"start": "11-01", "end": "11-27"}},
+    {"mission_id": "seas-xmas-01", "name": "Decorate for Christmas", "epic_name": "Light the Winter Hearth!", "summary": "Tree, lights, the whole glow.", "region": "Household", "recurring_kind": "yearly", "reward_xp": 60, "window": {"start": "11-25", "end": "12-25"},
+     "bonus_tasks": [{"name": "Hang the lights", "xp": 20}]},
+    {"mission_id": "seas-july4-01", "name": "4th of July setup", "epic_name": "Ignite the Independence Blaze!", "summary": "Decor, cookout plan, fireworks safety check.", "region": "Household", "recurring_kind": "yearly", "reward_xp": 50, "window": {"start": "06-20", "end": "07-04"}},
+    {"mission_id": "seas-spring-01", "name": "Spring garden wake-up", "epic_name": "Wake the Sleeping Garden!", "summary": "Beds, seeds, the season's first planting.", "region": "Greenhouse", "recurring_kind": "yearly", "reward_xp": 50, "window": {"start": "03-01", "end": "05-15"}},
+    {"mission_id": "seas-newyear-01", "name": "New Year review and goals", "epic_name": "Chart the New Year's Course!", "summary": "Look back, set the course, pick the year's quests.", "region": "Missions", "recurring_kind": "yearly", "reward_xp": 80, "window": {"start": "12-28", "end": "01-07"}}
+  ]
+}

@@ -114,6 +114,31 @@
   }
   .chkrow { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--dim); margin: 0 0 12px; }
   .hint { font-size: 11.5px; color: #7193a5; padding-top: 8px; }
+  /* MIA-suggested missions: review cards, confirm gate, celebration */
+  .rar {
+    display: inline-block; font-size: 11px; letter-spacing: .12em; font-weight: 700;
+    border-radius: 4px; padding: 2px 7px; margin-left: 8px; text-transform: uppercase;
+  }
+  .rar-Common { color: #dfe7ec; background: #3a4750; }
+  .rar-Uncommon { color: #06130a; background: #7dd87d; }
+  .rar-Rare { color: #06121a; background: #3ec6ff; }
+  .rar-Epic { color: #160a1e; background: #c77dff; }
+  .rar-Legendary { color: #1e1206; background: #ffb02e; }
+  .epic { display: block; font-size: 22px; font-weight: 800; margin-top: 4px; line-height: 1.25; }
+  .reason { display: block; font-size: 15px; color: var(--ok); margin-top: 7px; line-height: 1.45; font-style: italic; }
+  .overlay {
+    position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.88); padding: 34px;
+  }
+  .cel {
+    width: 100%; text-align: center; border-radius: 16px; padding: 28px 22px;
+    background: #0d1419; border: 2px solid var(--rc, #3ec6ff);
+    box-shadow: 0 0 42px var(--rc, #3ec6ff);
+  }
+  .cel-kicker { font-size: 13px; letter-spacing: .3em; color: var(--rc, #3ec6ff); font-weight: 800; }
+  .cel-epic { font-size: 30px; font-weight: 800; margin: 12px 0 6px; line-height: 1.2; }
+  .cel-rewards { margin: 14px 0 4px; font-size: 17px; color: var(--xp); font-weight: 700; line-height: 1.7; }
+  .cel-total { font-size: 14px; color: var(--dim); margin-bottom: 18px; }
 </style>
 </head>
 <body>
@@ -187,6 +212,17 @@ const MOCK = {
       detail: "Walk the cell, glance at the twin.", xp: 25 },
     { id: "k1l2m3n4o5", area: "Garage", title: "Calibrate pH pen",
       detail: "Due every 30 days — last done 34 days ago.", xp: 40 }
+  ],
+  suggested: [
+    { id: "gen-rot-horde", area: "Kitchen", title: "Use up the expiring food",
+      detail: "Before they turn: milk, spinach.",
+      xp: 30, epic_name: "Defeat the Rot Horde!", bonus_tasks: [],
+      rarity: "Common", reason: "MIA noticed expiring items: milk, spinach.",
+      source: "mia-generated",
+      voice: { epic_title: "Defeat the Rot Horde!", rarity: "Common",
+        new_mission: "New Mission: Defeat the Rot Horde!",
+        complete: "Mission: Defeat the Rot Horde! Complete!",
+        reward_lines: ["+30 XP"], total_xp: 30, bonus_count: 0 } }
   ]
 };
 
@@ -197,7 +233,8 @@ const PAGES = [
   { key: "proposals", label: "Proposals", empty: "No proposals awaiting review." },
   { key: "tracked", label: "Tracked", empty: "Nothing tracked yet." },
   { key: "next_up", label: "Next up", empty: "All clear." },
-  { key: "quests", label: "Today's quests", empty: "No quests yet — enjoy the day." }
+  { key: "quests", label: "Today's quests", empty: "No quests yet — enjoy the day." },
+  { key: "suggested", label: "MIA suggests", empty: "Nothing suggested right now — she'll speak up when she notices something." }
 ];
 
 let STATE = MOCK;
@@ -214,6 +251,26 @@ let decisions = LS.get("decisions", {});
 let doneQuests = LS.get("done", {});
 let pendingAdds = LS.get("pending_adds", []);
 let draftQuest = null;
+/* Mission-acceptance flow: MIA's suggestions, one decision at a time. */
+let sugDecisions = LS.get("sug_decisions", {});
+let acceptedMissions = LS.get("accepted_missions", []);
+let pendingSync = LS.get("pending_sync", []);
+let confirmSug = null;
+let celebrating = null;
+
+const RARITY_COLOR = {
+  Common: "#c9d4dc", Uncommon: "#7dd87d", Rare: "#3ec6ff",
+  Epic: "#c77dff", Legendary: "#ffb02e"
+};
+
+function visibleSuggestions() {
+  return (STATE.suggested || []).filter(s => !sugDecisions[s.id]);
+}
+function visibleQuests() {
+  const base = (STATE.quests || []).concat(
+    acceptedMissions.filter(a => !(STATE.quests || []).some(q => q.id === a.id)));
+  return base;
+}
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -225,9 +282,11 @@ function el(tag, cls, text) {
 function summaryText() {
   const a = (STATE.attention || []).length;
   const p = (STATE.proposals || []).filter(x => !decisions[x.id]).length;
-  const q = (STATE.quests || []).filter(x => !doneQuests[x.id]).length;
+  const q = visibleQuests().filter(x => !doneQuests[x.id]).length;
+  const s = visibleSuggestions().length;
   const bits = [a ? a + (a === 1 ? " thing needs" : " things need") + " you" : "nothing needs you"];
   if (p) bits.push(p + (p === 1 ? " proposal waiting" : " proposals waiting"));
+  if (s) bits.push(s + (s === 1 ? " suggestion waiting" : " suggestions waiting"));
   if (q) bits.push(q + (q === 1 ? " quest open" : " quests open"));
   bits.push("all else quiet");
   return bits.join(" · ") + ".";
@@ -309,6 +368,152 @@ function cardBtn(item, isQuest) {
 
 
 const SEV_RANK = { critical: 0, warning: 1, info: 2 };
+
+/* ---- Mission-acceptance flow ----
+   suggestion -> explicit confirm -> accepted mission -> "New Mission" celebration.
+   Dismissals are recorded too; the exporter's novelty ledger keeps rejected
+   suggestions quiet for a week. Decisions POST to the laptop loop
+   (tools/serve.py); without it they stay on this device, marked pending —
+   the same honesty pattern as drafted quests. */
+function suggestionCard(s) {
+  const b = el("button", "card sev-info");
+  b.type = "button";
+  b.append(el("span", "area", (s.area || "Missions") + " · MIA noticed"));
+  const epic = el("span", "epic");
+  epic.textContent = (s.voice && s.voice.epic_title) || s.epic_name || s.title;
+  b.append(epic);
+  if (s.title) b.append(el("span", "cdetail", s.title));
+  if (s.reason) b.append(el("span", "reason", "\u201C" + s.reason + "\u201D"));
+  const row = el("span", "row");
+  const left = el("span");
+  left.append(el("span", "xp", "+" + (s.xp || 10) + " XP"));
+  const rar = el("span", "rar rar-" + (s.rarity || "Common"));
+  rar.textContent = s.rarity || "Common";
+  left.append(rar);
+  row.append(left);
+  row.append(el("span", "action", (openId === s.id ? "Close" : "Review") + " \u2192"));
+  b.append(row);
+  b.addEventListener("click", () => toggleDetail(s.id));
+  return b;
+}
+
+function suggestionPanel(s) {
+  const p = el("div", "expand sev-info");
+  p.append(el("span", "tag", "MIA SUGGESTION"));
+  if (s.reason) p.append(el("div", "dsum", s.reason));
+  if (s.detail) p.append(el("div", "cdetail", s.detail));
+  const v = s.voice || {};
+  if (v.bonus_count) p.append(el("div", "note",
+    v.bonus_count + (v.bonus_count === 1 ? " bonus task" : " bonus tasks") +
+    " available · up to +" + v.total_xp + " XP"));
+  const btns = el("div", "btns");
+  const ap = el("button", "btn primary", "Accept");
+  ap.type = "button";
+  ap.addEventListener("click", () => { confirmSug = s.id; render(true); });
+  const dm = el("button", "btn", "Not now");
+  dm.type = "button";
+  dm.addEventListener("click", () => decideSuggestion(s, "dismissed"));
+  btns.append(ap); btns.append(dm);
+  p.append(btns);
+  p.append(el("div", "full", "Accepting starts it as one of today's quests. MIA never starts a mission for you — one decision at a time."));
+  return p;
+}
+
+function confirmOverlay(s) {
+  const o = el("div", "overlay");
+  const c = el("div", "cel");
+  c.style.setProperty("--rc", RARITY_COLOR[s.rarity] || "#3ec6ff");
+  c.append(el("div", "cel-kicker", "START THIS MISSION?"));
+  const epic = el("div", "cel-epic");
+  epic.textContent = (s.voice && s.voice.epic_title) || s.epic_name || s.title;
+  c.append(epic);
+  if (s.reason) c.append(el("div", "dsum", s.reason));
+  c.append(el("div", "cel-rewards", "+" + (s.xp || 10) + " XP · " + (s.rarity || "Common")));
+  const btns = el("div", "btns");
+  const go = el("button", "btn primary", "Start mission");
+  go.type = "button";
+  go.addEventListener("click", () => { confirmSug = null; acceptSuggestion(s); });
+  const no = el("button", "btn", "Cancel");
+  no.type = "button";
+  no.addEventListener("click", () => { confirmSug = null; render(true); });
+  btns.append(go); btns.append(no);
+  c.append(btns);
+  o.append(c);
+  return o;
+}
+
+function celebrationOverlay(v) {
+  const color = RARITY_COLOR[v.rarity] || "#3ec6ff";
+  const o = el("div", "overlay");
+  const c = el("div", "cel");
+  c.style.setProperty("--rc", color);
+  c.append(el("div", "cel-kicker", "NEW MISSION"));
+  const epic = el("div", "cel-epic");
+  epic.textContent = v.epic_title || "Untitled";
+  c.append(epic);
+  const rar = el("span", "rar rar-" + (v.rarity || "Common"));
+  rar.textContent = v.rarity || "Common";
+  c.append(rar);
+  const rw = el("div", "cel-rewards");
+  (v.reward_lines || []).forEach((line, i) => {
+    if (i) rw.append(el("br"));
+    rw.append(document.createTextNode(line));
+  });
+  c.append(rw);
+  if (v.total_xp) c.append(el("div", "cel-total", "Total available: +" + v.total_xp + " XP"));
+  const btns = el("div", "btns");
+  const go = el("button", "btn primary", "Let's go");
+  go.type = "button";
+  go.addEventListener("click", () => { celebrating = null; render(true); });
+  btns.append(go);
+  c.append(btns);
+  o.append(c);
+  return o;
+}
+
+function recordDecision(s, decision) {
+  sugDecisions[s.id] = { decision, at: new Date().toISOString() };
+  LS.set("sug_decisions", sugDecisions);
+  const payload = { id: s.id, decision, at: sugDecisions[s.id].at, snapshot: s };
+  fetch("api/mission-decision", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  }).then(r => {
+    if (!r.ok) throw new Error("http " + r.status);
+    pendingSync = pendingSync.filter(id => id !== s.id);
+    LS.set("pending_sync", pendingSync);
+    render(false);
+  }).catch(() => {
+    if (!pendingSync.includes(s.id)) {
+      pendingSync.push(s.id);
+      LS.set("pending_sync", pendingSync);
+    }
+    render(false);
+  });
+}
+
+function decideSuggestion(s, decision) {
+  recordDecision(s, decision);
+  if (openId === s.id) openId = null;
+  render(true);
+}
+
+function acceptSuggestion(s) {
+  const quest = {
+    id: s.id, area: s.area || "Missions", title: s.title, detail: s.detail,
+    xp: s.xp || 10, epic_name: s.epic_name, bonus_tasks: s.bonus_tasks || [],
+    voice: s.voice, rarity: s.rarity, from_suggestion: true
+  };
+  if (!acceptedMissions.some(q => q.id === quest.id)) {
+    acceptedMissions.push(quest);
+    LS.set("accepted_missions", acceptedMissions);
+  }
+  recordDecision(s, "accepted");
+  celebrating = s.voice || { epic_title: s.epic_name || s.title, rarity: s.rarity,
+    reward_lines: ["+" + (s.xp || 10) + " XP"], total_xp: s.xp || 10 };
+  render(true);
+}
 const BRIEF_CHIPS = [
   { key: "attention", area: "Ask MIA", phrase: "\u201CWhat needs me?\u201D" },
   { key: "greenhouse", area: "Greenhouse", phrase: "\u201CWhat's the greenhouse doing?\u201D" },
@@ -453,8 +658,20 @@ function render(refocus) {
   document.getElementById("summary").style.display = pg.key === "answer" ? "none" : "";
   if (pg.key === "answer") renderAnswer(box);
   else if (pg.key === "ask") renderAsk(box);
+  else if (pg.key === "suggested") {
+    const items = visibleSuggestions();
+    if (!items.length) { box.append(el("div", "empty", pg.empty)); }
+    for (const s of items) {
+      box.append(suggestionCard(s));
+      if (openId === s.id) box.append(suggestionPanel(s));
+    }
+    const pend = pendingSync.filter(id => sugDecisions[id]);
+    if (pend.length) box.append(el("div", "note",
+      pend.length + (pend.length === 1 ? " decision" : " decisions") +
+      " queued on this device — syncs on the next laptop export."));
+  }
   else {
-    const items = STATE[pg.key] || [];
+    const items = pg.key === "quests" ? visibleQuests() : (STATE[pg.key] || []);
     if (!items.length) { box.append(el("div", "empty", pg.empty)); }
     const isQuest = pg.key === "quests";
     for (const item of items) {
@@ -462,6 +679,12 @@ function render(refocus) {
       if (!isQuest && openId === item.id) box.append(expandPanel(item));
     }
   }
+  if (confirmSug) {
+    const s = visibleSuggestions().find(x => x.id === confirmSug);
+    if (s) box.append(confirmOverlay(s));
+    else confirmSug = null;
+  }
+  if (celebrating) box.append(celebrationOverlay(celebrating));
   if (refocus) {
     const first = box.querySelector(".card, .btn");
     if (first) first.focus({ preventScroll: true });
@@ -501,7 +724,12 @@ document.addEventListener("keydown", e => {
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
   if (e.key === "ArrowRight") { e.preventDefault(); gotoPage(page + 1); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); gotoPage(page - 1); }
-  else if (e.key === "Escape") { e.preventDefault(); closeDetail(); }
+  else if (e.key === "Escape") {
+    e.preventDefault();
+    if (celebrating) { celebrating = null; render(true); }
+    else if (confirmSug) { confirmSug = null; render(true); }
+    else closeDetail();
+  }
   else if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey && !e.altKey) refresh();
 });
 

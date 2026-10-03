@@ -1,0 +1,202 @@
+{
+  "pack_id": "starter",
+  "name": "Everyday Adventuring",
+  "description": "The universal pack: kitchen, workouts, home, budget, inbox \u2014 the quests almost anyone would want.",
+  "default_enabled": true,
+  "quests": [
+    {
+      "mission_id": "deck-kitchen-01",
+      "name": "Clean the kitchen",
+      "epic_name": "Destroy the Kitchen Mess Monster!",
+      "summary": "Dishes, counters, stove \u2014 the full sweep.",
+      "region": "Kitchen",
+      "recurring_kind": "weekly",
+      "reward_xp": 35,
+      "bonus_tasks": [
+        {
+          "name": "Take out the trash",
+          "xp": 20
+        },
+        {
+          "name": "Wipe the appliances",
+          "xp": 10
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-kitchen-02",
+      "name": "Cook a real dinner",
+      "epic_name": "Forge Dinner in the Iron Pan!",
+      "summary": "A recipe from the cookbook, start to finish.",
+      "region": "Kitchen",
+      "recurring_kind": "weekly",
+      "reward_xp": 50,
+      "bonus_tasks": [
+        {
+          "name": "Log the recipe rating",
+          "xp": 10
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-workout-01",
+      "name": "Push day",
+      "epic_name": "Enter the Iron Sanctum!",
+      "summary": "Chest, shoulders, triceps.",
+      "region": "Workout",
+      "recurring_kind": "daily",
+      "reward_xp": 40,
+      "bonus_tasks": [
+        {
+          "name": "Beat last session's weight",
+          "xp": 15
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-workout-02",
+      "name": "Go for a run",
+      "epic_name": "Outrun the Dawn!",
+      "summary": "At least 20 minutes, any pace.",
+      "region": "Workout",
+      "recurring_kind": "weekly",
+      "reward_xp": 45,
+      "bonus_tasks": [
+        {
+          "name": "New distance record",
+          "xp": 20
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-garage-01",
+      "name": "Service the mower",
+      "epic_name": "Feed the Steel Beast!",
+      "summary": "Oil, blades, air filter \u2014 the Z315E demands tribute.",
+      "region": "Garage",
+      "recurring_kind": "seasonal",
+      "reward_xp": 80,
+      "bonus_tasks": [
+        {
+          "name": "Log the meter reading",
+          "xp": 10
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-property-01",
+      "name": "Take out the trash",
+      "epic_name": "Banish the Trash Golem!",
+      "summary": "Bins to the curb before pickup.",
+      "region": "Property",
+      "recurring_kind": "weekly",
+      "reward_xp": 20
+    },
+    {
+      "mission_id": "deck-property-02",
+      "name": "Mow the lawn",
+      "epic_name": "Tame the Grasslands!",
+      "summary": "Front and back, edges if you're feeling heroic.",
+      "region": "Property",
+      "recurring_kind": "weekly",
+      "reward_xp": 60
+    },
+    {
+      "mission_id": "deck-greenhouse-01",
+      "name": "Check greenhouse levels",
+      "epic_name": "Tame the Acid Tide!",
+      "summary": "pH, EC, temperature \u2014 read the waters.",
+      "region": "Greenhouse",
+      "recurring_kind": "daily",
+      "reward_xp": 30,
+      "bonus_tasks": [
+        {
+          "name": "Feed the fish",
+          "xp": 10
+        },
+        {
+          "name": "Inspect for pests",
+          "xp": 10
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-budget-01",
+      "name": "Review weekly spending",
+      "epic_name": "Audit the Vault!",
+      "summary": "Check the budget pace against targets.",
+      "region": "Budget",
+      "recurring_kind": "weekly",
+      "reward_xp": 40
+    },
+    {
+      "mission_id": "deck-household-01",
+      "name": "Do the laundry",
+      "epic_name": "Defeat the Laundry Hydra!",
+      "summary": "Wash, dry, fold \u2014 cut off every head.",
+      "region": "Household",
+      "recurring_kind": "weekly",
+      "reward_xp": 35,
+      "bonus_tasks": [
+        {
+          "name": "Fold and put away same day",
+          "xp": 15
+        }
+      ]
+    },
+    {
+      "mission_id": "deck-inbox-01",
+      "name": "Clear the inbox",
+      "epic_name": "Slay the Inbox Dragon!",
+      "summary": "Triage to zero: act, file, or burn.",
+      "region": "Inbox",
+      "recurring_kind": "daily",
+      "reward_xp": 30
+    },
+    {
+      "mission_id": "deck-knowledge-01",
+      "name": "Journal the day",
+      "epic_name": "Chronicle the Journey!",
+      "summary": "Three lines on what happened and what's next.",
+      "region": "Knowledge",
+      "recurring_kind": "daily",
+      "reward_xp": 25
+    },
+    {
+      "mission_id": "deck-music-01",
+      "name": "Practice music",
+      "epic_name": "Summon the Melody!",
+      "summary": "30 minutes with the instrument.",
+      "region": "Music",
+      "recurring_kind": "weekly",
+      "reward_xp": 45
+    },
+    {
+      "mission_id": "deck-workout-03",
+      "name": "Long hike",
+      "epic_name": "Conquer the Wild Trail!",
+      "summary": "Get outside for at least an hour.",
+      "region": "Expeditions",
+      "recurring_kind": "monthly",
+      "reward_xp": 120
+    },
+    {
+      "mission_id": "deck-greenhouse-02",
+      "name": "Winterize the greenhouse",
+      "epic_name": "Fortify the Glass Citadel!",
+      "summary": "Seal, insulate, protect the stock before first freeze.",
+      "region": "Greenhouse",
+      "recurring_kind": "seasonal",
+      "reward_xp": 150
+    },
+    {
+      "mission_id": "deck-garage-02",
+      "name": "Winterize the pressure washer",
+      "epic_name": "Put the Water Cannon to Sleep!",
+      "summary": "Drain, stabilize, store before the freeze.",
+      "region": "Garage",
+      "recurring_kind": "seasonal",
+      "reward_xp": 60
+    }
+  ]
+}

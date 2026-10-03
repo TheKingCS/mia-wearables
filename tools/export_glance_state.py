@@ -947,7 +947,145 @@ def quest_voice(q):
     }
 
 
-def generate_missions(data_dir, today, attention, next_up, tracked, quests):
+def load_quest_packs():
+    """Opt-in quest content packs. Universal engine, personal content:
+    packs are how MIA serves different lives — starter for everyone,
+    seasonal-celebrations (or gardener, student, parent...) only for
+    subscribers. Pack quests never fire unless the pack is enabled."""
+    packs = {}
+    d = Path(__file__).parent / "quest_packs"
+    if d.is_dir():
+        for f in sorted(d.glob("*.json")):
+            try:
+                p = json.loads(f.read_text())
+            except Exception:
+                continue
+            if isinstance(p, dict) and p.get("pack_id"):
+                packs[p["pack_id"]] = p
+    return packs
+
+
+def _in_window(today, window):
+    """window = {'start': 'MM-DD', 'end': 'MM-DD'}; handles year wrap."""
+    if not window:
+        return True
+    def tup(s):
+        m, d_ = s.split("-")
+        return (int(m), int(d_))
+    now, s, e = (today.month, today.day), tup(window["start"]), tup(window["end"])
+    return s <= now <= e if s <= e else (now >= s or now <= e)
+
+
+NOVELTY_DAYS = 7          # dismissed suggestions stay quiet this long
+ACCEPT_SUPPRESS_DAYS = 30  # accepted-but-not-yet-applied fallback window
+
+
+def _decision_suppresses(mid, d):
+    """Novelty ledger: should this suggestion id stay quiet?
+
+    Dismissed -> quiet for NOVELTY_DAYS (rejected suggestions must not
+    reappear immediately). Accepted -> quiet for ACCEPT_SUPPRESS_DAYS as
+    a fallback; once the mission is applied to missions.json, the
+    suggestion_id on the active quest suppresses it instead, and once
+    that quest is done/archived the trigger may suggest again.
+    """
+    if not isinstance(d, dict):
+        return False
+    try:
+        at = dt.datetime.fromisoformat(str(d.get("at", "")))
+    except ValueError:
+        return True  # unparseable timestamp: stay quiet, don't nag
+    age_days = (dt.datetime.now() - at).days
+    if d.get("decision") == "dismissed":
+        return age_days < NOVELTY_DAYS
+    if d.get("decision") == "accepted":
+        return age_days < ACCEPT_SUPPRESS_DAYS
+    return False
+
+
+def load_decisions(path):
+    """Read the mission-decision ledger (JSONL, one {id, decision, at,
+    snapshot} per line, newest wins per id). Written by tools/serve.py
+    from the surface's accept/dismiss taps; the snapshot lets --apply
+    materialize an accepted suggestion even if its trigger has since
+    cleared."""
+    decisions = {}
+    p = Path(path)
+    if not p.is_file():
+        return decisions
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and e.get("id") and e.get("decision"):
+            decisions[e["id"]] = e
+    return decisions
+
+
+def mission_from_suggestion(snap, date=None):
+    """Materialize an accepted suggestion as a real MIA mission record.
+
+    mission_id is {suggestion_id}-{date} so accepting the same trigger
+    on different days yields distinct missions; the suggestion_id field
+    lets generate_missions() suppress re-suggestion while active.
+    """
+    day = (date or dt.date.today()).isoformat()
+    sid = snap.get("id", "gen-unknown")
+    bonus = [b for b in (snap.get("bonus_tasks") or []) if isinstance(b, dict)]
+    return {
+        "mission_id": f"{sid}-{day}",
+        "suggestion_id": sid,
+        "name": snap.get("title", "Untitled mission"),
+        "epic_name": snap.get("epic_name"),
+        "summary": snap.get("detail", ""),
+        "region": snap.get("area") or "Missions",
+        "reward_xp": snap.get("xp", 0) or 0,
+        "bonus_tasks": bonus,
+        "status": "active",
+        "source": "mia-generated",
+        "accepted_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "profile_id": None,
+    }
+
+
+def apply_decisions(decisions, missions_path):
+    """Append accepted suggestions to MIA's data/missions.json.
+
+    Idempotent: skips when the mission_id is already present. Returns
+    (applied, skipped). Dismissed decisions need no write — the ledger
+    itself is the novelty record generate_missions() consults.
+    """
+    p = Path(missions_path)
+    try:
+        missions = json.loads(p.read_text())
+    except (OSError, ValueError):
+        return 0, 0
+    if not isinstance(missions, list):
+        return 0, 0
+    have = {m.get("mission_id") for m in missions if isinstance(m, dict)}
+    applied = skipped = 0
+    for mid, d in (decisions or {}).items():
+        if d.get("decision") != "accepted":
+            continue
+        snap = d.get("snapshot") or {"id": mid}
+        mission = mission_from_suggestion(snap)
+        if mission["mission_id"] in have:
+            skipped += 1
+            continue
+        missions.append(mission)
+        have.add(mission["mission_id"])
+        applied += 1
+    if applied:
+        p.write_text(json.dumps(missions, indent=2))
+    return applied, skipped
+
+
+def generate_missions(data_dir, today, attention, next_up, tracked, quests,
+                      packs=None, enabled_packs=None, decisions=None):
     """MIA invents missions herself.
 
     This is the differentiator Zac asked for: not a self-managed quest
@@ -961,15 +1099,23 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests):
         return []
     suggested = []
     have = {(q.get("area"), (q.get("title") or "").lower()) for q in quests}
+    # Suggestion ids already live as active missions (accepted earlier and
+    # applied) suppress re-suggestion while the mission is still active.
+    have_ids = {q.get("suggestion_id") for q in quests if q.get("suggestion_id")}
+    suppressed = {mid for mid, d in (decisions or {}).items()
+                  if _decision_suppresses(mid, d)}
 
-    def propose(mid, region, title, epic, detail, reason, xp):
+    def propose(mid, region, title, epic, detail, reason, xp, bonus_tasks=None):
         if (region, title.lower()) in have:
             return  # don't suggest what's already a quest
+        if mid in have_ids or mid in suppressed:
+            return  # accepted/dismissed recently — novelty ledger
         q = {"id": mid, "area": region, "title": title, "detail": detail,
-             "xp": xp, "epic_name": epic}
+             "xp": xp, "epic_name": epic, "bonus_tasks": bonus_tasks or []}
         suggested.append({
             "id": mid, "area": region, "title": title,
             "detail": detail, "xp": xp,
+            "epic_name": epic, "bonus_tasks": bonus_tasks or [],
             "rarity": rarity_for(xp),
             "reason": reason,
             "source": "mia-generated",
@@ -1032,6 +1178,45 @@ def generate_missions(data_dir, today, attention, next_up, tracked, quests):
                     c.get("detail", ""),
                     f"MIA noticed {c.get('title', 'it has been a while')}",
                     35)
+    # 6b. Seasonal pack quests — calendar-driven, only for subscribers
+    packs = packs or {}
+    enabled = enabled_packs if enabled_packs is not None else {
+        pid for pid, p in packs.items() if p.get("default_enabled")}
+    for pid in enabled:
+        p = packs.get(pid, {})
+        for m in p.get("quests", []):
+            if not isinstance(m, dict):
+                continue
+            if not m.get("window"):
+                continue  # library content, not a calendar trigger
+            if not _in_window(today, m.get("window")):
+                continue
+            mid = f"gen-{m.get('mission_id')}"
+            if any(g.get("id") == mid for g in suggested):
+                continue
+            if mid in have_ids or mid in suppressed:
+                continue  # accepted/dismissed recently — novelty ledger
+            q = {"id": mid, "area": m.get("region") or "Missions",
+                 "title": m.get("name", "Seasonal quest"),
+                 "detail": m.get("summary", ""),
+                 "xp": m.get("reward_xp", 0),
+                 "epic_name": m.get("epic_name"),
+                 "bonus_tasks": m.get("bonus_tasks", [])}
+            if (q["area"], q["title"].lower()) in have:
+                continue
+            suggested.append({
+                "id": mid, "area": q["area"], "title": q["title"],
+                "detail": q["detail"], "xp": q["xp"],
+                "epic_name": m.get("epic_name"),
+                "bonus_tasks": m.get("bonus_tasks", []),
+                "rarity": rarity_for(q["xp"]),
+                "reason": (f"MIA noticed it's that time of year — "
+                           f"{p.get('name', pid)} pack"),
+                "source": "mia-generated", "pack_id": pid,
+                "voice": quest_voice(q),
+            })
+            have.add((q["area"], q["title"].lower()))
+
     # 6. Overdue bills -> settle reminders (reminders only — paying stays
     #    phone/desktop-only; she proposes the nudge, never the transfer)
     for c in attention:
@@ -1148,6 +1333,7 @@ def load_missions_quests(missions_path, profile_id=None):
             continue  # weekly occurrences use {start}-W{n} keys; leave to a future pass
         quests.append({
             "id": m.get("mission_id"),
+            "suggestion_id": m.get("suggestion_id"),
             "area": m.get("region") or "Missions",
             "title": m.get("name", "Unnamed mission"),
             "detail": m.get("summary", ""),
@@ -1184,6 +1370,18 @@ def main():
                          "(reads the module JSON files directly)")
     ap.add_argument("--profile", default=None,
                     help="MIA profile_id for mission visibility (default: shared only)")
+    ap.add_argument("--enable-packs", default=None,
+                    help="Comma-separated quest pack ids to enable "
+                         "(default: packs with default_enabled=true)")
+    ap.add_argument("--decisions", default=None,
+                    help="Path to mission_decisions.jsonl — accept/dismiss "
+                         "taps from the surface (default: next to --out). "
+                         "Dismissed suggestions are suppressed for "
+                         "%d days; accepted ones are suppressed too." % NOVELTY_DAYS)
+    ap.add_argument("--apply-decisions", action="store_true",
+                    help="Materialize accepted suggestions as active "
+                         "missions in the --missions file (requires "
+                         "--missions). Idempotent.")
     ap.add_argument("--out", default="webapp/state.json")
     args = ap.parse_args()
 
@@ -1254,9 +1452,32 @@ def main():
     for q in quests:
         if isinstance(q, dict) and "voice" not in q:
             q["voice"] = quest_voice(q)
+    # Mission decisions: the surface's accept/dismiss taps. Apply accepted
+    # ones to missions.json first so the reloaded quest list (and the
+    # suggestion_id suppression in generate_missions) sees them this run.
+    decisions_path = args.decisions or str(Path(args.out).parent / "mission_decisions.jsonl")
+    decisions = load_decisions(decisions_path)
+    if args.apply_decisions:
+        if args.missions:
+            applied, skipped = apply_decisions(decisions, args.missions)
+            if applied or skipped:
+                print(f"Applied mission decisions: {applied} accepted, "
+                      f"{skipped} already present.")
+                quests = load_missions_quests(args.missions, args.profile)
+                for q in quests:
+                    if isinstance(q, dict) and "voice" not in q:
+                        q["voice"] = quest_voice(q)
+        else:
+            print("Note: --apply-decisions needs --missions; decisions not applied.")
     today = dt.date.today()
+    packs = load_quest_packs()
+    enabled = None
+    if args.enable_packs:
+        enabled = {p.strip() for p in args.enable_packs.split(",") if p.strip()}
     suggested = generate_missions(args.mia_data, today, attention,
-                                  next_up, tracked, quests)
+                                  next_up, tracked, quests,
+                                  packs=packs, enabled_packs=enabled,
+                                  decisions=decisions)
     brief = build_brief(attention, proposals, tracked, quests)
     answer = build_answer(attention, proposals, quests)
 
@@ -1286,7 +1507,8 @@ def main():
     out.write_text(json.dumps(state, indent=2))
     print(f"Wrote {out}: {len(attention)} attention, {len(proposals)} proposals, "
           f"{len(tracked)} tracked, {len(next_up)} next-up, "
-          f"{len(quests)} quests (source={state['meta']['source']}).")
+          f"{len(quests)} quests, {len(suggested)} suggested "
+          f"(source={state['meta']['source']}).")
 
 
 if __name__ == "__main__":
