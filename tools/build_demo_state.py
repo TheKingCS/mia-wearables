@@ -100,6 +100,20 @@ def build_fixture(workdir):
     (mia_data / "workout_templates.json").write_text(json.dumps([
         {"template_id": "push", "name": "Push day"},
     ], indent=2))
+    (mia_data / "kitchen_recipes.json").write_text(json.dumps([
+        {"recipe_id": "demo-teriyaki", "name": "Teriyaki Chicken",
+         "cook_time_minutes": 20,
+         "ingredients": [
+             {"quantity": "1", "unit": "lb", "name": "chicken thighs"},
+             {"quantity": "1/4", "unit": "cup", "name": "soy sauce"},
+             {"quantity": "2", "unit": "tbsp", "name": "honey"},
+             {"quantity": "1", "unit": "tsp", "name": "grated ginger"}],
+         "steps": [
+             "Mix the soy sauce, honey, and ginger in a bowl.",
+             "Sear the chicken 5 minutes per side over medium-high heat.",
+             "Pour in the sauce and simmer 4 minutes, until thick and glossy.",
+             "Rest 2 minutes, slice, and serve over rice."]},
+    ], indent=2))
     (mia_data / "maintenance.json").write_text(json.dumps({
         "assets": [{"asset_id": "demo-mower", "name": "Demo mower",
                     "category": "Tool"}],

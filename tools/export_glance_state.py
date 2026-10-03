@@ -983,6 +983,169 @@ NOVELTY_DAYS = 7          # dismissed suggestions stay quiet this long
 ACCEPT_SUPPRESS_DAYS = 30  # accepted-but-not-yet-applied fallback window
 
 
+# ---------------------------------------------------------------------------
+# Voice runtime (Surface 1 composer + Surface 2 audio glasses share this)
+#
+# The exporter pre-renders everything voice needs so answers are fast and
+# offline-capable: the four self-scripts (rule zero: she explains herself
+# simply), the intent routing table, and the cookbook. The webapp and the
+# Android companion consume the same payload, so she never disagrees with
+# herself across surfaces. See docs/voice-spec.md.
+# ---------------------------------------------------------------------------
+
+VOICE_SCRIPTS = {
+    "who": ("I'm MIA, your personal assistant. I run on your own machines, "
+            "so your life stays yours — I keep track of it and speak up "
+            "only when something's useful."),
+    "can": ("I watch your bills and budget, workouts, pantry and recipes, "
+            "greenhouse, properties, and your quests. Ask what's due, what "
+            "you can cook, or how your week's going — and I can log things "
+            "and add quests when you say yes."),
+    "help": ("Try: 'What needs me?' — 'What's due this week?' — 'Read me a "
+             "recipe.' — 'Log my workout.' — or 'Add a quest.'"),
+    "know": ("Everything I know lives on your machines — your modules, "
+             "missions, and Life State. Nothing leaves unless you send it."),
+}
+
+# Ordered: scripts, then actions, then brief reads. The router takes the
+# first match, so "log my workout" must beat the "workout" brief keyword.
+VOICE_INTENTS = [
+    {"intent": "who", "kind": "script", "target": "who",
+     "patterns": ["who are you", "your name", "introduce yourself"]},
+    {"intent": "can", "kind": "script", "target": "can",
+     "patterns": ["what can you do", "capabilities", "what do you do"]},
+    {"intent": "help", "kind": "script", "target": "help",
+     "patterns": ["help", "what can i ask", "commands", "options"]},
+    {"intent": "know", "kind": "script", "target": "know",
+     "patterns": ["what do you know about me", "what do you know"]},
+    {"intent": "workout_log", "kind": "workout_log", "target": None,
+     "patterns": ["log my workout", "log workout", "record workout",
+                  "log my run", "log my lift"]},
+    {"intent": "recipe", "kind": "recipe", "target": None,
+     "patterns": ["recipe", "read me the", "cook the", "what can i cook",
+                  "cook something"]},
+    {"intent": "bills", "kind": "brief", "target": "bills",
+     "patterns": ["bill", "bills", "what's due", "what is due", "payments"]},
+    {"intent": "budget", "kind": "brief", "target": "finance",
+     "patterns": ["budget", "spending", "money", "how's my budget",
+                  "how is my budget"]},
+    {"intent": "greenhouse", "kind": "brief", "target": "greenhouse",
+     "patterns": ["greenhouse", "plants", "cells", "ph"]},
+    {"intent": "attention", "kind": "brief", "target": "attention",
+     "patterns": ["what needs me", "needs me", "what's wrong",
+                  "what is wrong", "attention"]},
+    {"intent": "proposals", "kind": "brief", "target": "proposals",
+     "patterns": ["proposal", "proposals", "waiting", "approve"]},
+    {"intent": "quests", "kind": "brief", "target": "quests",
+     "patterns": ["quest", "quests", "mission", "missions", "today"]},
+    {"intent": "workout", "kind": "brief", "target": "workout",
+     "patterns": ["workout", "exercise", "gym", "training", "streak"]},
+    {"intent": "kitchen", "kind": "brief", "target": "kitchen",
+     "patterns": ["kitchen", "pantry", "fridge", "food", "groceries"]},
+]
+
+
+def build_cookbook(data_dir):
+    """Recipes with full ingredients + steps for cooking mode.
+
+    Hands stay on the food: the surface reads one step at a time
+    (Next/Repeat/Done). Only recipes with actual steps qualify.
+    """
+    books = []
+    for r in load_list(Path(data_dir) / "kitchen_recipes.json"):
+        if not isinstance(r, dict):
+            continue
+        steps = [str(s).strip()
+                 for s in (r.get("steps") or r.get("instructions") or [])
+                 if str(s).strip()]
+        if not steps:
+            continue
+        ings = []
+        for i in (r.get("ingredients") or []):
+            if isinstance(i, dict):
+                qty = str(i.get("quantity", "")).strip()
+                unit = str(i.get("unit", "")).strip()
+                ings.append(f"{qty} {unit} {i.get('name', '')}".strip())
+            else:
+                ings.append(str(i).strip())
+        books.append({
+            "id": r.get("recipe_id") or r.get("id") or r.get("name"),
+            "name": r.get("name", "Untitled recipe"),
+            "ingredients": [x for x in ings if x],
+            "steps": steps,
+            "time_minutes": r.get("cook_time_minutes") or r.get("cook_time"),
+        })
+    return books
+
+
+def build_voice(data_dir):
+    """The voice runtime's data plane: scripts, routing, cookbook."""
+    return {
+        "scripts": VOICE_SCRIPTS,
+        "intents": VOICE_INTENTS,
+        "cookbook": build_cookbook(data_dir) if data_dir else [],
+        "note": "Same data as the glance — voice never disagrees with it.",
+    }
+
+
+def apply_workouts(logs_path, data_dir):
+    """Append confirm-gated voice workout logs to workout_sessions.json.
+
+    Idempotent on (date, name, minutes). Matches template names to
+    template_ids where possible so the cards keep working.
+    Returns (applied, skipped).
+    """
+    lp = Path(logs_path)
+    if not lp.is_file():
+        return 0, 0
+    p = Path(data_dir) / "workout_sessions.json"
+    try:
+        sessions = json.loads(p.read_text())
+    except (OSError, ValueError):
+        return 0, 0
+    if not isinstance(sessions, list):
+        return 0, 0
+    templates = {}
+    for t in load_list(Path(data_dir) / "workout_templates.json"):
+        if isinstance(t, dict) and t.get("name"):
+            templates[str(t["name"]).lower()] = t.get("template_id")
+    have = set()
+    for s in sessions:
+        if isinstance(s, dict):
+            have.add((s.get("date"),
+                      str(s.get("template_id") or s.get("name") or "").lower(),
+                      s.get("duration_minutes")))
+    applied = skipped = 0
+    for line in lp.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict) or not e.get("date"):
+            continue
+        name = str(e.get("name") or "Workout")
+        key = (e["date"], name.lower(), e.get("duration_minutes"))
+        if key in have:
+            skipped += 1
+            continue
+        entry = {"date": e["date"], "name": name,
+                 "duration_minutes": e.get("duration_minutes"),
+                 "source": "voice",
+                 "logged_at": e.get("logged_at")}
+        tid = templates.get(name.lower())
+        if tid:
+            entry["template_id"] = tid
+        sessions.append(entry)
+        have.add(key)
+        applied += 1
+    if applied:
+        p.write_text(json.dumps(sessions, indent=2))
+    return applied, skipped
+
+
 def _decision_suppresses(mid, d):
     """Novelty ledger: should this suggestion id stay quiet?
 
@@ -1504,6 +1667,13 @@ def main():
                     help="Materialize accepted suggestions as active "
                          "missions in the --missions file (requires "
                          "--missions). Idempotent.")
+    ap.add_argument("--apply-workouts", action="store_true",
+                    help="Append confirm-gated voice workout logs to "
+                         "workout_sessions.json (requires --mia-data). "
+                         "Idempotent.")
+    ap.add_argument("--workout-logs", default=None,
+                    help="Path to workout_logs.jsonl — voice-logged "
+                         "workouts from the surface (default: next to --out).")
     ap.add_argument("--out", default="webapp/state.json")
     args = ap.parse_args()
 
@@ -1624,10 +1794,23 @@ def main():
                                   decisions=decisions)
     brief = build_brief(attention, proposals, tracked, quests)
     answer = build_answer(attention, proposals, quests)
+    voice = build_voice(args.mia_data)
+
+    # Voice-logged workouts: confirm-gated on the surface, applied here.
+    if args.apply_workouts:
+        if args.mia_data:
+            wlogs = args.workout_logs or str(Path(args.out).parent / "workout_logs.jsonl")
+            applied, skipped = apply_workouts(wlogs, args.mia_data)
+            if applied or skipped:
+                print(f"Applied workout logs: {applied} logged, "
+                      f"{skipped} already present.")
+        else:
+            print("Note: --apply-workouts needs --mia-data; logs not applied.")
 
     state = {
         "answer": answer,
         "brief": brief,
+        "voice": voice,
         "meta": {
             "source": "live" if (dash or args.mia_data) else "mock",
             "generated_at": dt.datetime.now().isoformat(timespec="seconds"),

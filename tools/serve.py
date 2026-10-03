@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """Dev-loop server for MIA Glance.
 
-Serves webapp/ statically (like `python -m http.server`) and adds one
-write endpoint for the mission-acceptance flow:
+Serves webapp/ statically (like `python -m http.server`) and adds two
+write endpoints for the confirm-gated flows:
 
     POST /api/mission-decision   {id, decision, at, snapshot}
       -> appends a JSON line to webapp/mission_decisions.jsonl
 
-The exporter picks that file up via --decisions (default: next to
---out) and --apply-decisions materializes accepted suggestions as real
-missions in MIA's data/missions.json. Dismissed ids feed the novelty
-ledger (quiet for 7 days).
+    POST /api/workout-log       {date, name, duration_minutes}
+      -> appends a JSON line to webapp/workout_logs.jsonl
+         (channel: voice; applied by exporter --apply-workouts)
+
+The exporter picks those files up via --decisions / --workout-logs
+(defaults: next to --out); --apply-decisions materializes accepted
+suggestions as real missions in MIA's data/missions.json and
+--apply-workouts appends voice logs to workout_sessions.json.
+Dismissed suggestion ids feed the novelty ledger (quiet for 7 days).
 
 This is the LOCAL dev loop only (laptop -> Cloudflare tunnel -> glasses).
 The production path is the authenticated /api/bridge/* on MIA's phone
-server (see docs/muse-bridge-spec.md); the webapp POSTs to this same
-relative path and falls back to on-device queueing when it is absent.
+server (see docs/muse-bridge-spec.md); the webapp POSTs to these same
+relative paths and falls back to on-device queueing when absent.
 
 Usage:
     python tools/serve.py [--port 8080] [--dir webapp]
@@ -30,6 +35,7 @@ from pathlib import Path
 
 class Handler(SimpleHTTPRequestHandler):
     decisions_file = None
+    workout_logs_file = None
 
     def _json(self, code, obj):
         body = json.dumps(obj).encode()
@@ -39,9 +45,14 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _append_jsonl(self, path, entry):
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+
     def do_POST(self):
-        if self.path.split("?")[0] != "/api/mission-decision":
-            return self._json(404, {"error": "not found"})
+        path = self.path.split("?")[0]
         try:
             length = int(self.headers.get("Content-Length", 0))
         except ValueError:
@@ -50,19 +61,34 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
         except ValueError:
             return self._json(400, {"error": "invalid JSON"})
-        if payload.get("decision") not in ("accepted", "dismissed") or not payload.get("id"):
-            return self._json(400, {"error": "need {id, decision: accepted|dismissed}"})
-        entry = {
-            "id": payload["id"],
-            "decision": payload["decision"],
-            "at": payload.get("at") or datetime.now(timezone.utc).isoformat(),
-            "snapshot": payload.get("snapshot") or {"id": payload["id"]},
-        }
-        p = Path(self.decisions_file)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("a") as f:
-            f.write(json.dumps(entry) + "\n")
-        return self._json(200, {"ok": True})
+        if path == "/api/mission-decision":
+            if payload.get("decision") not in ("accepted", "dismissed") or not payload.get("id"):
+                return self._json(400, {"error": "need {id, decision: accepted|dismissed}"})
+            entry = {
+                "id": payload["id"],
+                "decision": payload["decision"],
+                "at": payload.get("at") or datetime.now(timezone.utc).isoformat(),
+                "snapshot": payload.get("snapshot") or {"id": payload["id"]},
+            }
+            self._append_jsonl(self.decisions_file, entry)
+            return self._json(200, {"ok": True})
+        if path == "/api/workout-log":
+            # Confirm-gated on the surface; the server only records what
+            # the user explicitly confirmed. Exporter --apply-workouts
+            # materializes these into workout_sessions.json.
+            if not payload.get("date") or not payload.get("name"):
+                return self._json(400, {"error": "need {date, name}"})
+            entry = {
+                "date": payload["date"],
+                "name": payload["name"],
+                "duration_minutes": payload.get("duration_minutes"),
+                "logged_at": payload.get("logged_at")
+                             or datetime.now(timezone.utc).isoformat(),
+                "channel": "voice",
+            }
+            self._append_jsonl(self.workout_logs_file, entry)
+            return self._json(200, {"ok": True})
+        return self._json(404, {"error": "not found"})
 
     def log_message(self, fmt, *args):  # quieter than the default
         if self.path.startswith("/api/"):
@@ -76,10 +102,12 @@ def main():
     args = ap.parse_args()
     root = Path(args.dir)
     Handler.decisions_file = str(root / "mission_decisions.jsonl")
+    Handler.workout_logs_file = str(root / "workout_logs.jsonl")
     handler = partial(Handler, directory=str(root))
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     print(f"Serving {root}/ on http://127.0.0.1:{args.port} "
-          f"(POST /api/mission-decision -> {Handler.decisions_file})")
+          f"(POST /api/mission-decision -> {Handler.decisions_file}; "
+          f"POST /api/workout-log -> {Handler.workout_logs_file})")
     srv.serve_forever()
 
 
