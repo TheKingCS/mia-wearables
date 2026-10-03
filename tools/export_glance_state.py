@@ -83,6 +83,8 @@ def due_line(due_date):
 
 
 PARAM_LABELS = {
+    "ph": "pH",
+    "ec": "EC",
     "ph_target_min": "pH target minimum",
     "ph_target_max": "pH target maximum",
     "ec_target_min": "EC target minimum",
